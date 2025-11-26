@@ -1,0 +1,24 @@
+{
+  "rule_id": "S08",
+  "rule_name": "Shape Substitution",
+  "difficulty": "simple",
+  "description": "Cycle shapes across steps",
+  "params": {
+    "sequence": [
+      "cylinder",
+      "cone",
+      "cube"
+    ],
+    "center": [
+      -0.2754158856382832,
+      -0.2900834186828825,
+      0.18796214352016344
+    ],
+    "rotation": [
+      0.32417747232597616,
+      0.08375154244000521,
+      0.18024617750286287
+    ]
+  },
+  "point_count": 512
+}

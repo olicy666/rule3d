@@ -1,0 +1,11 @@
+{
+  "rule_id": "C08",
+  "rule_name": "Symmetry + Scale",
+  "difficulty": "complex",
+  "description": "Mirror objects scale together",
+  "params": {
+    "factor": 1.3626194285735096,
+    "distance": 0.5933436146910465
+  },
+  "point_count": 4096
+}
