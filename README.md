@@ -1,6 +1,6 @@
 # 三宫格点云数据集生成器
 
-本项目实现了 `program.md` 描述的三步点云生成系统。支持四种基础几何体、40 条可插拔规则、按难度概率采样，输出 A/B/C 三张点云及 meta 信息。
+本项目实现了 `program.md` 描述的三步点云生成系统。支持四种基础几何体、40 条可插拔规则、按难度概率采样，输出六张点云（A/B 参考 + C/D/E/F 选项，其中仅一张正确）及 meta 信息。
 
 ## 快速开始
 环境：Python 3.10+，依赖仅 `numpy`。
@@ -14,7 +14,11 @@ output/sample_000000/
     A.ply
     B.ply
     C.ply
-    meta.json
+    D.ply
+    E.ply
+    F.ply
+    meta.json  # 当前题目的路径与答案（同下方 meta 列表格式）
+output/meta.json  # 所有题目组成的列表
 ```
 
 ## 常用参数

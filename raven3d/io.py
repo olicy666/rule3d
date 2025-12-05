@@ -35,4 +35,4 @@ def write_meta(path: str | os.PathLike, meta: Dict[str, Any]) -> None:
     path = Path(path)
     ensure_dir(path.parent)
     with path.open("w") as f:
-        json.dump(meta, f, indent=2)
+        json.dump(meta, f, indent=2, ensure_ascii=False)
