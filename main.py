@@ -4,6 +4,7 @@ import argparse
 
 from raven3d.dataset import DatasetGenerator, GenerationConfig
 from raven3d.factory import create_default_registry
+from raven3d.rules.groups import list_available_modes, rules_for_mode
 from raven3d.rules.base import RuleDifficulty
 
 
@@ -16,6 +17,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--simple-prob", type=float, default=0.7, help="Probability for simple rules")
     parser.add_argument("--medium-prob", type=float, default=0.2, help="Probability for medium rules")
     parser.add_argument("--complex-prob", type=float, default=0.1, help="Probability for complex rules")
+    parser.add_argument(
+        "--mode",
+        type=str.lower,
+        default="main",
+        choices=list_available_modes(),
+        help="Rule preset: main / r1-only / r2-only / r3-only / r4-only / r1-1 / r1-2 / r1-3 / "
+        "r1-4 / r2-1 / r2-2 / r3-1 / r3-2 / all-minus-r1 / all-minus-r2 / all-minus-r3 / all-minus-r4",
+    )
     return parser.parse_args()
 
 
@@ -26,11 +35,12 @@ def main() -> None:
         RuleDifficulty.MEDIUM: args.medium_prob,
         RuleDifficulty.COMPLEX: args.complex_prob,
     }
-    config = GenerationConfig(n_points=args.points, difficulty_probs=probs)
+    rule_filter = rules_for_mode(args.mode)
+    config = GenerationConfig(n_points=args.points, difficulty_probs=probs, rule_filter=rule_filter)
     registry = create_default_registry()
     generator = DatasetGenerator(registry, config=config, seed=args.seed)
     generator.generate_dataset(args.output, args.num_samples)
-    print(f"Generated {args.num_samples} samples in {args.output}")
+    print(f"Generated {args.num_samples} samples in {args.output} with mode '{args.mode}'")
 
 
 if __name__ == "__main__":

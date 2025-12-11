@@ -1,15 +1,16 @@
 {
   "id": "sample-03",
-  "ref1_path": "sample_000002/A.ply",
-  "ref2_path": "sample_000002/B.ply",
-  "cand1_path": "sample_000002/C.ply",
-  "cand2_path": "sample_000002/D.ply",
-  "cand3_path": "sample_000002/E.ply",
-  "cand4_path": "sample_000002/F.ply",
-  "gt_option": 4,
+  "ref1_path": "sample_000002/1.ply",
+  "ref2_path": "sample_000002/2.ply",
+  "cand1_path": "sample_000002/3.ply",
+  "cand2_path": "sample_000002/4.ply",
+  "cand3_path": "sample_000002/5.ply",
+  "cand4_path": "sample_000002/6.ply",
+  "gt_option": "C",
   "point_count": 4096,
-  "cand1_reason": "形状被替换，违背了原规则的形状/拓扑约束",
+  "cand1_reason": "位置偏移破坏了原规则的平移或对齐关系",
   "cand2_reason": "姿态变化打破了原规则的旋转模式",
-  "cand3_reason": "尺度比例被打破，不再符合原规则的大小递进",
-  "cand4_reason": "符合原规则的正确延续"
+  "cand3_reason": "符合原规则的正确延续",
+  "cand4_reason": "尺度比例被打破，不再符合原规则的大小递进",
+  "rule_id": "S07"
 }

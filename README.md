@@ -11,14 +11,15 @@ python main.py --output output --num-samples 3 --points 4096 --seed 0
 生成目录示例：
 ```
 output/sample_000000/
-    A.ply
-    B.ply
-    C.ply
-    D.ply
-    E.ply
-    F.ply
+    1.ply
+    2.ply
+    3.ply
+    4.ply
+    5.ply
+    6.ply
     meta.json  # 当前题目的路径与答案（同下方 meta 列表格式）
 output/meta.json  # 所有题目组成的列表
+                 # 每个 meta 中包含 rule_id 以便回溯规则
 ```
 
 ## 常用参数
@@ -27,10 +28,40 @@ output/meta.json  # 所有题目组成的列表
 - `--points`：每个点云的点数，默认 4096
 - `--seed`：固定随机种子
 - `--simple-prob` / `--medium-prob` / `--complex-prob`：三种难度的采样概率，默认 0.7 / 0.2 / 0.1
+- `--mode`：规则采样模式，默认 `main`。可选 `r1-only`/`r2-only`/`r3-only`/`r4-only` 四大类，`r1-1`~`r3-2` 子类，以及消融的 `all-minus-rX`（详见 `program.md` 的四种模式说明）。
+
+说明：A/B/C/D 选项的正确答案位置是均衡分布的（例如 100 题时四个选项各 25 次）。文件名映射：参考 1/2，对应候选 3/4/5/6，A/B/C/D 分别指向 3/4/5/6。
+
+## 运行指令示例（覆盖四类模式）
+- 主模式（40 条规则随机，答案均衡）：`python main.py --output output --num-samples 100 --mode main`
+
+- 单大类模式：
+  - R1 物体属性：`python main.py --num-samples 50 --mode r1-only`
+  - R2 成对空间关系：`python main.py --num-samples 50 --mode r2-only`
+  - R3 多物体构型：`python main.py --num-samples 50 --mode r3-only`
+  - R4 结构与拓扑：`python main.py --num-samples 50 --mode r4-only`
+
+- 大类内子类模式：
+  - R1-1 尺度/比例：`python main.py --num-samples 20 --mode r1-1`
+  - R1-2 位姿（旋转/平移）：`python main.py --num-samples 20 --mode r1-2`
+  - R1-3 外观/密度/恒等：`python main.py --num-samples 20 --mode r1-3`
+  - R1-4 复合联动序列：`python main.py --num-samples 20 --mode r1-4`
+  - R2-1 拓扑强度：`python main.py --num-samples 20 --mode r2-1`
+  - R2-2 度量/方向：`python main.py --num-samples 20 --mode r2-2`
+  - R3-1 全局对称与身份：`python main.py --num-samples 20 --mode r3-1`
+  - R3-2 群体组织高阶构型：`python main.py --num-samples 20 --mode r3-2`
+
+- 消融模式（去掉一个大类）：
+  - 去掉 R1：`python main.py --num-samples 30 --mode all-minus-r1`
+  - 去掉 R2：`python main.py --num-samples 30 --mode all-minus-r2`
+  - 去掉 R3：`python main.py --num-samples 30 --mode all-minus-r3`
+  - 去掉 R4：`python main.py --num-samples 30 --mode all-minus-r4`
+
+可选参数：`--points` 控制点数，`--seed` 固定随机性，`--simple-prob/--medium-prob/--complex-prob` 调整难度比例（在当前模式可用规则内按概率抽样）。
 
 示例：只生成复杂题目 5 道
 ```bash
-python main.py --num-samples 5 --simple-prob 0 --medium-prob 0 --complex-prob 1
+python main.py --num-samples 5 --simple-prob 0 --medium-prob 0 --complex-prob 1 --mode r4-only
 ```
 
 ## 规则体系（40 条,具体规则见rule.md文档）

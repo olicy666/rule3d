@@ -80,7 +80,8 @@ class S04FixedAxisRotation(Rule):
 
     def sample_params(self, rng) -> Dict:
         axis = int(rng.integers(0, 3))
-        delta = float(rng.uniform(math.pi / 12, math.pi / 6))
+        # Larger step so旋转差异肉眼可见
+        delta = float(rng.uniform(math.pi / 6, math.pi / 3))
         return {"axis": axis, "delta": delta, "base": primitive_to_config(random_primitive(rng))}
 
     def generate_triplet(self, params, rng):
@@ -100,7 +101,8 @@ class S05FullEulerRotation(Rule):
         super().__init__("S05", RuleDifficulty.SIMPLE, "Full Euler Rotation", "Increment all Euler angles")
 
     def sample_params(self, rng) -> Dict:
-        delta = rng.uniform(math.pi / 18, math.pi / 8, size=3)
+        # Bigger per-axis increments for显著姿态变化
+        delta = rng.uniform(math.pi / 8, math.pi / 3, size=3)
         return {"delta": delta.tolist(), "base": primitive_to_config(random_primitive(rng))}
 
     def generate_triplet(self, params, rng):
@@ -136,8 +138,9 @@ class S07TwoStepTranslation(Rule):
     def sample_params(self, rng) -> Dict:
         direction = rng.normal(size=3)
         direction /= np.linalg.norm(direction) + 1e-9
-        d1 = float(rng.uniform(0.2, 0.6))
-        ratio = float(rng.uniform(0.5, 1.5))
+        # Use a larger base step so A/B/C 的平移差异在可视化上更明显
+        d1 = float(rng.uniform(0.6, 1.0))
+        ratio = float(rng.uniform(0.8, 1.5))
         return {
             "direction": direction.tolist(),
             "d1": d1,
@@ -296,7 +299,8 @@ class S13SinglePrimitiveRotationFixedPoint(Rule):
     def sample_params(self, rng) -> Dict:
         base = primitive_to_config(random_primitive(rng))
         pivot = rng.uniform(-0.2, 0.2, size=3)
-        delta = rng.uniform(math.pi / 18, math.pi / 10, size=3)
+        # Increase rotation to make pivoted spin明显
+        delta = rng.uniform(math.pi / 12, math.pi / 4, size=3)
         return {"base": base, "pivot": pivot.tolist(), "delta": delta.tolist()}
 
     def generate_triplet(self, params, rng):
