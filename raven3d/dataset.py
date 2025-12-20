@@ -7,10 +7,10 @@ from typing import Dict, List, Set, Tuple
 import numpy as np
 
 from .io import write_meta, write_ply, ensure_dir
-from .geometry import Sphere, Cube, Cylinder, Cone, Primitive
 from .registry import RuleRegistry
 from .rules.base import RuleDifficulty
 from .scene import Scene
+from .rules.utils import apply_rotation, apply_scale, apply_translation, random_object
 
 
 @dataclass
@@ -60,62 +60,48 @@ class DatasetGenerator:
         idx = self.rng.integers(0, len(rules))
         return rules[int(idx)]
 
-    def _swap_shape_preserve_transform(self, prim: Primitive) -> Primitive:
-        """Replace primitive type but keep center/rotation/scale."""
-        center = prim.center.copy()
-        rotation = prim.rotation.copy()
-        scale = prim.scale.copy()
-        shapes = [Sphere, Cube, Cylinder, Cone]
-        # Choose a different shape class.
-        choices = [cls for cls in shapes if not isinstance(prim, cls)]
-        cls = choices[int(self.rng.integers(0, len(choices)))]
-        if cls is Sphere:
-            new_prim = Sphere(center=center, rotation=rotation, scale=scale, radius=float(self.rng.uniform(0.3, 0.6)))
-        elif cls is Cube:
-            edges = self.rng.uniform(0.4, 0.9, size=3)
-            new_prim = Cube(center=center, rotation=rotation, scale=scale, edge_lengths=edges)
-        elif cls is Cylinder:
-            new_prim = Cylinder(
-                center=center,
-                rotation=rotation,
-                scale=scale,
-                radius=float(self.rng.uniform(0.25, 0.55)),
-                height=float(self.rng.uniform(0.6, 1.1)),
-            )
-        else:  # Cone
-            new_prim = Cone(
-                center=center,
-                rotation=rotation,
-                scale=scale,
-                radius=float(self.rng.uniform(0.25, 0.55)),
-                height=float(self.rng.uniform(0.7, 1.1)),
-            )
-        return new_prim
-
-    def _perturb_scene(self, scene: Scene) -> Tuple[Scene, str]:
-        """Create a distractor by altering one property of the correct scene."""
+    def _perturb_scene(self, scene: Scene, meta: Dict) -> Tuple[Scene, str]:
+        """Create a distractor by altering one participating object while keeping others intact."""
         new_scene = scene.copy()
-        if not new_scene.primitives:
+        if not new_scene.objects:
             return new_scene, "场景为空"
-        prim_idx = int(self.rng.integers(0, len(new_scene.primitives)))
-        prim = new_scene.primitives[prim_idx]
-        perturb_types = ["scale", "translation", "rotation", "shape"]
-        kind = str(self.rng.choice(perturb_types))
-        if kind == "scale":
-            factor = float(self.rng.uniform(0.6, 0.9) if self.rng.random() < 0.5 else self.rng.uniform(1.1, 1.4))
-            prim.scale = prim.scale * factor
-            reason = "尺度比例被打破，不再符合原规则的大小递进"
-        elif kind == "translation":
-            delta = self.rng.uniform(0.2, 0.5, size=3) * self.rng.choice([-1, 1], size=3)
-            prim.center = prim.center + delta
-            reason = "位置偏移破坏了原规则的平移或对齐关系"
-        elif kind == "rotation":
+        involved = meta.get("involved_indices") or list(range(len(new_scene.objects)))
+        base_attrs = meta.get("base_attrs_used", [])
+        derived_funcs = meta.get("derived_funcs", [])
+        pattern = meta.get("pattern_type", "模式变换")
+        attr_map = {"r": "尺度", "p": "位置", "R": "姿态", "d": "密度", "s": "形状"}
+        attr_desc = "、".join(attr_map.get(a, a) for a in base_attrs) if base_attrs else "属性"
+        derived_desc = "、".join(derived_funcs) if derived_funcs else attr_desc
+        idx = int(self.rng.choice(involved))
+        obj = new_scene.objects[idx]
+        reason = "扰动"
+        if "r" in base_attrs:
+            factor = float(self.rng.uniform(0.65, 0.85) if self.rng.random() < 0.5 else self.rng.uniform(1.15, 1.35))
+            new_scene.objects[idx] = apply_scale(obj, factor)
+            reason = f"修改{attr_desc}，派生 {derived_desc} 不再满足 {pattern} 模式变换（尺度被缩放）"
+        elif "p" in base_attrs:
+            delta = self.rng.uniform(0.15, 0.35, size=3) * self.rng.choice([-1, 1], size=3)
+            new_scene.objects[idx] = apply_translation(obj, delta)
+            reason = f"平移参与对象，派生 {derived_desc} 不再符合 {pattern} 模式变换"
+        elif "R" in base_attrs:
             delta = self.rng.uniform(0.2, 0.5, size=3)
-            prim.rotation = prim.rotation + delta
-            reason = "姿态变化打破了原规则的旋转模式"
-        else:  # shape
-            new_scene.primitives[prim_idx] = self._swap_shape_preserve_transform(prim)
-            reason = "形状被替换，违背了原规则的形状/拓扑约束"
+            new_scene.objects[idx] = apply_rotation(obj, delta)
+            reason = f"改变姿态，派生 {derived_desc} 与 {pattern} 模式变换失配"
+        elif "d" in base_attrs:
+            factor = float(self.rng.uniform(0.6, 0.85) if self.rng.random() < 0.5 else self.rng.uniform(1.2, 1.4))
+            new_scene.objects[idx] = obj.copy()
+            new_scene.objects[idx].density = max(obj.density * factor, 1e-3)
+            reason = f"调整密度，导致 {derived_desc} 破坏 {pattern} 模式变换"
+        elif "s" in base_attrs:
+            alt_shape = random_object(self.rng).shape
+            new_scene.objects[idx] = obj.copy()
+            new_scene.objects[idx].shape = alt_shape
+            reason = f"替换形状，派生 {derived_desc} 不再满足 {pattern} 模式变换"
+        else:
+            # fallback: small translation
+            delta = self.rng.uniform(0.15, 0.3, size=3) * self.rng.choice([-1, 1], size=3)
+            new_scene.objects[idx] = apply_translation(obj, delta)
+            reason = f"引入位移扰动，破坏 {pattern} 模式变换"
         return new_scene, reason
 
     def generate_sample(self, output_root: Path, sample_index: int, correct_idx: int | None = None) -> Dict:
@@ -139,10 +125,22 @@ class DatasetGenerator:
         candidate_points[correct_idx] = correct_pts
         candidate_reasons[correct_idx] = "符合原规则的正确延续"
 
+        distractor_scenes, distractor_reasons = rule.make_distractors(scene_c, self.rng, meta_params)
+        if len(distractor_scenes) != 3:
+            distractor_scenes = []
+            distractor_reasons = []
+            for _ in range(len(option_labels) - 1):
+                sc, rs = self._perturb_scene(scene_c, meta_params)
+                distractor_scenes.append(sc)
+                distractor_reasons.append(rs)
+
+        d_idx = 0
         for i in range(len(candidate_points)):
             if candidate_points[i] is not None:
                 continue
-            distractor_scene, reason = self._perturb_scene(scene_c)
+            distractor_scene = distractor_scenes[d_idx]
+            reason = distractor_reasons[d_idx] if d_idx < len(distractor_reasons) else "扰动候选"
+            d_idx += 1
             candidate_points[i] = distractor_scene.sample_point_cloud(self.config.n_points)
             candidate_reasons[i] = reason
 
@@ -175,6 +173,7 @@ class DatasetGenerator:
             "cand3_reason": candidate_reasons[2],
             "cand4_reason": candidate_reasons[3],
             "rule_id": rule.rule_id,
+            "rule_meta": meta_params,
         }
         write_meta(sample_dir / "meta.json", entry)
         return entry

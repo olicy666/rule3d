@@ -2,361 +2,608 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Dict, List, Sequence
 
 import numpy as np
 
 from .base import Rule, RuleDifficulty
 from .utils import (
+    SHAPES,
+    ang,
     apply_rotation,
     apply_scale,
     apply_translation,
-    primitive_from_config,
-    primitive_to_config,
-    random_primitive,
+    aspect_ratio,
+    build_rule_meta,
+    centroid,
+    clone_objects,
+    contain,
+    direction,
+    dist,
+    init_objects,
+    order_indices_x,
+    scene_from_objects,
+    size,
+    symmetry_flag,
+    touch,
 )
-from ..geometry import Cube, Cylinder, Sphere, Cone, rotation_matrix
 from ..scene import Scene
 
 
-def unit_vector(rng: np.random.Generator) -> np.ndarray:
+def _unit_vector(rng: np.random.Generator) -> np.ndarray:
     v = rng.normal(size=3)
     return v / (np.linalg.norm(v) + 1e-9)
 
 
 @dataclass
-class M01SeparateTouchIntersect(Rule):
+class M01DistanceArithmetic(Rule):
     def __init__(self) -> None:
-        super().__init__("M01", RuleDifficulty.MEDIUM, "Separate → Touch → Intersect", "Objects move from separate to intersecting")
+        super().__init__("M01", RuleDifficulty.MEDIUM, "成对距离等差", "dist(i,j) 等差")
 
     def sample_params(self, rng) -> Dict:
-        r1, r2 = float(rng.uniform(0.25, 0.45)), float(rng.uniform(0.25, 0.45))
-        direction = unit_vector(rng)
-        return {"radii": [r1, r2], "direction": direction.tolist()}
+        base = float(rng.uniform(0.6, 1.1))
+        step = float(rng.uniform(0.15, 0.35)) * (1 if rng.random() < 0.5 else -1)
+        return {"base": base, "step": step}
 
     def generate_triplet(self, params, rng):
-        r1, r2 = params["radii"]
-        direction = np.array(params["direction"])
-        gap_a = (r1 + r2) * 1.8
-        gap_b = (r1 + r2) * 1.0
-        gap_c = (r1 + r2) * 0.6
-        center1 = -direction * gap_a / 2
-        center2 = direction * gap_a / 2
-        obj1 = Sphere(center=center1, radius=r1)
-        obj2 = Sphere(center=center2, radius=r2)
-        a = Scene([obj1, obj2])
-        b = Scene(
-            [
-                Sphere(center=-direction * gap_b / 2, radius=r1),
-                Sphere(center=direction * gap_b / 2, radius=r2),
-            ]
+        base, step = params["base"], params["step"]
+        direction_vec = _unit_vector(rng)
+        objs = init_objects(rng, 2, m=2)
+        involved = [0, 1]
+        def place(distance: float):
+            obj_a, obj_b = clone_objects(objs)
+            obj_a.p = -direction_vec * distance / 2
+            obj_b.p = direction_vec * distance / 2
+            return [obj_a, obj_b]
+
+        distances = [base, base + step, base + 2 * step]
+        scenes_objs = [place(d) for d in distances]
+        scenes = [scene_from_objects(x) for x in scenes_objs]
+        v = distances
+        meta = build_rule_meta(
+            self, "R2", 2, involved, ["p"], ["dist(0,1)"], "arithmetic", {"delta": step}, v, scenes
         )
-        c = Scene(
-            [
-                Sphere(center=-direction * gap_c / 2, radius=r1),
-                Sphere(center=direction * gap_c / 2, radius=r2),
-            ]
+        return scenes[0], scenes[1], scenes[2], meta
+
+
+@dataclass
+class M02DistanceGeometric(Rule):
+    def __init__(self) -> None:
+        super().__init__("M02", RuleDifficulty.MEDIUM, "成对距离等比", "dist(i,j) 等比")
+
+    def sample_params(self, rng) -> Dict:
+        k = float(rng.uniform(1.15, 1.6) if rng.random() < 0.5 else rng.uniform(0.65, 0.9))
+        base = float(rng.uniform(0.5, 1.0))
+        return {"k": k, "base": base}
+
+    def generate_triplet(self, params, rng):
+        k, base = params["k"], params["base"]
+        direction_vec = _unit_vector(rng)
+        objs = init_objects(rng, 2, m=2)
+        involved = [0, 1]
+
+        def place(distance: float):
+            obj_a, obj_b = clone_objects(objs)
+            obj_a.p = -direction_vec * distance / 2
+            obj_b.p = direction_vec * distance / 2
+            return [obj_a, obj_b]
+
+        distances = [base, base * k, base * k * k]
+        scenes_objs = [place(d) for d in distances]
+        scenes = [scene_from_objects(x) for x in scenes_objs]
+        v = distances
+        meta = build_rule_meta(
+            self, "R2", 2, involved, ["p"], ["dist(0,1)"], "geometric", {"k": k}, v, scenes
         )
-        return a, b, c, params
+        return scenes[0], scenes[1], scenes[2], meta
 
 
 @dataclass
-class M02IntersectionDepthGrowth(Rule):
+class M03DirectionLocked(Rule):
     def __init__(self) -> None:
-        super().__init__("M02", RuleDifficulty.MEDIUM, "Intersection Depth Growth", "Intersection depth increases along direction")
+        super().__init__("M03", RuleDifficulty.MEDIUM, "方向保持距离变化", "dir 恒定, dist 线性")
 
     def sample_params(self, rng) -> Dict:
-        direction = unit_vector(rng)
-        offset = float(rng.uniform(0.4, 0.8))
-        return {"direction": direction.tolist(), "offset": offset}
+        step = float(rng.uniform(0.1, 0.3)) * (1 if rng.random() < 0.5 else -1)
+        base = float(rng.uniform(0.6, 1.0))
+        return {"step": step, "base": base}
 
     def generate_triplet(self, params, rng):
-        direction = np.array(params["direction"])
-        offset = params["offset"]
-        base1 = Cube(center=-direction * offset, edge_lengths=np.array([0.8, 0.8, 0.8]))
-        base2 = Cube(center=direction * offset, edge_lengths=np.array([0.8, 0.8, 0.8]))
-        delta = direction * offset * 0.6
-        a = Scene([base1, base2])
-        b = Scene([apply_translation(base1, delta), base2])
-        c = Scene([apply_translation(base1, delta * 2), base2])
-        return a, b, c, params
+        base, step = params["base"], params["step"]
+        direction_vec = _unit_vector(rng)
+        objs = init_objects(rng, 2, m=2)
+        involved = [0, 1]
+
+        def place(distance: float):
+            o0, o1 = clone_objects(objs)
+            o0.p = np.zeros(3)
+            o1.p = direction_vec * distance
+            return [o0, o1]
+
+        distances = [base, base + step, base + 2 * step]
+        scenes_objs = [place(d) for d in distances]
+        scenes = [scene_from_objects(x) for x in scenes_objs]
+        v = distances
+        meta = build_rule_meta(
+            self,
+            "R2",
+            2,
+            involved,
+            ["p"],
+            ["dir(0,1)", "dist(0,1)"],
+            "direction-locked",
+            {"direction": direction_vec.tolist(), "delta": step},
+            v,
+            scenes,
+        )
+        return scenes[0], scenes[1], scenes[2], meta
 
 
 @dataclass
-class M03Containment(Rule):
+class M04DirectionRotate(Rule):
     def __init__(self) -> None:
-        super().__init__("M03", RuleDifficulty.MEDIUM, "Containment", "Inner moves inside outer without leaving")
+        super().__init__("M04", RuleDifficulty.MEDIUM, "方向旋转等差角", "dir 旋转, dist 保持")
 
     def sample_params(self, rng) -> Dict:
-        outer_size = float(rng.uniform(1.2, 1.6))
-        inner_radius = float(rng.uniform(0.25, 0.45))
-        return {"outer_size": outer_size, "inner_radius": inner_radius}
+        theta = float(rng.uniform(math.pi / 12, math.pi / 6))
+        base = float(rng.uniform(0.7, 1.0))
+        return {"theta": theta, "base": base}
 
     def generate_triplet(self, params, rng):
-        outer_size = params["outer_size"]
-        inner_radius = params["inner_radius"]
-        outer = Cube(center=np.zeros(3), edge_lengths=np.array([outer_size] * 3))
-        path = unit_vector(rng) * (outer_size / 4)
-        a_inner = Sphere(center=-path, radius=inner_radius)
-        b_inner = Sphere(center=np.zeros(3), radius=inner_radius)
-        c_inner = Sphere(center=path, radius=inner_radius)
-        return Scene([outer, a_inner]), Scene([outer, b_inner]), Scene([outer, c_inner]), params
+        theta, base = params["theta"], params["base"]
+        objs = init_objects(rng, 2, m=2)
+        involved = [0, 1]
+        # Use rotation around z axis for direction updates.
+        base_dir = _unit_vector(rng)
+        base_dir[2] = 0  # keep planar
+        base_dir = base_dir / (np.linalg.norm(base_dir) + 1e-9)
+
+        def rotate_dir(angle: float) -> np.ndarray:
+            rot = np.array([[math.cos(angle), -math.sin(angle), 0], [math.sin(angle), math.cos(angle), 0], [0, 0, 1]])
+            return rot @ base_dir
+
+        dirs = [rotate_dir(0), rotate_dir(theta), rotate_dir(2 * theta)]
+
+        def place(dir_vec: np.ndarray):
+            o0, o1 = clone_objects(objs)
+            o0.p = np.zeros(3)
+            o1.p = dir_vec * base
+            return [o0, o1]
+
+        scenes_objs = [place(d) for d in dirs]
+        scenes = [scene_from_objects(x) for x in scenes_objs]
+        v = [d.tolist() for d in dirs]
+        meta = build_rule_meta(
+            self,
+            "R2",
+            2,
+            involved,
+            ["p"],
+            ["dir(0,1)"],
+            "angular-arithmetic",
+            {"theta": theta},
+            v,
+            scenes,
+        )
+        return scenes[0], scenes[1], scenes[2], meta
 
 
 @dataclass
-class M04RelativePosition(Rule):
+class M05TouchSequence(Rule):
     def __init__(self) -> None:
-        super().__init__("M04", RuleDifficulty.MEDIUM, "Relative Position", "Objects move in one direction keeping ordering")
+        super().__init__("M05", RuleDifficulty.MEDIUM, "接触状态序列", "touch 序列 0→1→1")
 
     def sample_params(self, rng) -> Dict:
-        direction = unit_vector(rng)
-        step = float(rng.uniform(0.4, 0.8))
-        base = primitive_to_config(random_primitive(rng))
-        base2 = primitive_to_config(random_primitive(rng))
-        return {"direction": direction.tolist(), "step": step, "obj1": base, "obj2": base2}
+        return {}
 
     def generate_triplet(self, params, rng):
-        direction = np.array(params["direction"])
-        step = params["step"]
-        obj1 = primitive_from_config(params["obj1"])
-        obj2 = primitive_from_config(params["obj2"])
-        obj1.center = -direction * step
-        obj2.center = direction * step
-        a = Scene([obj1, obj2])
-        b = Scene([apply_translation(obj1, direction * step), apply_translation(obj2, direction * step)])
-        c = Scene([apply_translation(obj1, direction * step * 2), apply_translation(obj2, direction * step * 2)])
-        return a, b, c, {"direction": params["direction"], "step": step}
+        objs = init_objects(rng, 2, m=2)
+        involved = [0, 1]
+        a_obj0, a_obj1 = clone_objects(objs)
+        required = 0.2 + 0.6 * rng.random()
+        direction_vec = _unit_vector(rng)
+        # Step distances to realize touch states.
+        radius_sum = 0.5 * (np.linalg.norm(a_obj0.r) + np.linalg.norm(a_obj1.r))
+        dist_far = radius_sum + required
+        dist_touch = radius_sum * 1.02
+
+        def place(distance: float):
+            o0, o1 = clone_objects(objs)
+            o0.p = -direction_vec * distance / 2
+            o1.p = direction_vec * distance / 2
+            return [o0, o1]
+
+        scenes_objs = [place(dist_far), place(dist_touch), place(dist_touch * 0.95)]
+        scenes = [scene_from_objects(x) for x in scenes_objs]
+        v = [touch(*objs_pair) for objs_pair in scenes_objs]
+        meta = build_rule_meta(
+            self,
+            "R2",
+            2,
+            involved,
+            ["p", "r"],
+            ["touch(0,1)"],
+            "discrete",
+            {"sequence": [0, 1, 1]},
+            v,
+            scenes,
+        )
+        return scenes[0], scenes[1], scenes[2], meta
 
 
 @dataclass
-class M05CenterOfMassShift(Rule):
+class M06ContainSequence(Rule):
     def __init__(self) -> None:
-        super().__init__("M05", RuleDifficulty.MEDIUM, "Center-of-Mass Shift", "Relative center-of-mass offset changes linearly")
+        super().__init__("M06", RuleDifficulty.MEDIUM, "包含关系序列", "contain 序列 0→1→0")
 
     def sample_params(self, rng) -> Dict:
-        offset = float(rng.uniform(0.3, 0.7))
-        direction = unit_vector(rng)
-        return {"offset": offset, "direction": direction.tolist()}
+        return {}
 
     def generate_triplet(self, params, rng):
-        direction = np.array(params["direction"])
-        offset = params["offset"]
-        obj1 = Sphere(center=-direction * offset, radius=0.4)
-        obj2 = Cube(center=direction * offset, edge_lengths=np.array([0.6, 0.6, 0.6]))
-        delta = direction * offset * 0.6
-        a = Scene([obj1, obj2])
-        b = Scene([apply_translation(obj1, delta), obj2])
-        c = Scene([apply_translation(obj1, delta * 2), obj2])
-        return a, b, c, params
+        outer = init_objects(rng, 1, m=2)[0]
+        inner = init_objects(rng, 1, m=2)[1]
+        # Make sure outer is bigger.
+        outer.r = outer.r * 1.5
+        involved = [0, 1]
+        offset = rng.uniform(0.1, 0.25, size=3)
+
+        a_objs = [outer.copy(), apply_translation(inner, outer.p + offset - inner.p)]
+        b_inner = inner.copy()
+        b_inner.p = outer.p
+        b_objs = [outer.copy(), b_inner]
+        escape = outer.r * 0.8 + offset
+        c_objs = [outer.copy(), apply_translation(inner, outer.p + escape - inner.p)]
+        scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
+        v = [contain(*objs_pair) for objs_pair in [a_objs, b_objs, c_objs]]
+        meta = build_rule_meta(
+            self,
+            "R2",
+            2,
+            involved,
+            ["p", "r"],
+            ["contain(0,1)"],
+            "discrete",
+            {"sequence": [0, 1, 0]},
+            v,
+            scenes,
+        )
+        return scenes[0], scenes[1], scenes[2], meta
 
 
 @dataclass
-class M06ParallelPerpendicular(Rule):
+class M07AngleArithmetic(Rule):
     def __init__(self) -> None:
-        super().__init__("M06", RuleDifficulty.MEDIUM, "Parallel/Perpendicular", "Keep axes parallel or perpendicular")
+        super().__init__("M07", RuleDifficulty.MEDIUM, "夹角等差", "轴夹角按等差变化")
 
     def sample_params(self, rng) -> Dict:
-        base_angle = float(rng.uniform(0, math.pi / 4))
-        parallel = bool(rng.choice([True, False]))
-        return {"base_angle": base_angle, "mode": "parallel" if parallel else "perpendicular"}
+        base_angle = float(rng.uniform(math.pi / 12, math.pi / 6))
+        delta = float(rng.uniform(math.pi / 18, math.pi / 10))
+        return {"base_angle": base_angle, "delta": delta}
 
     def generate_triplet(self, params, rng):
-        base_angle = params["base_angle"]
-        parallel = params["mode"] == "parallel"
-        cyl1 = Cylinder(center=np.array([-0.4, 0, 0]), radius=0.25, height=1.2, rotation=np.array([base_angle, 0, 0]))
-        if parallel:
-            cyl2_rot = np.array([base_angle, 0, 0])
-        else:
-            cyl2_rot = np.array([base_angle + math.pi / 2, 0, 0])
-        cyl2 = Cylinder(center=np.array([0.4, 0, 0]), radius=0.25, height=1.2, rotation=cyl2_rot)
-        delta = np.array([0.1, 0.2, 0])
-        a = Scene([cyl1, cyl2])
-        b = Scene([apply_translation(cyl1, delta), apply_translation(cyl2, delta)])
-        c = Scene([apply_translation(cyl1, delta * 2), apply_translation(cyl2, delta * 2)])
-        return a, b, c, params
+        base_angle, delta = params["base_angle"], params["delta"]
+        objs = init_objects(rng, 2, m=2)
+        involved = [0, 1]
+        axis_rot = np.array([0.0, base_angle, 0.0])
+        a_objs = clone_objects(objs)
+        a_objs[1] = apply_rotation(a_objs[1], axis_rot)
+        b_objs = clone_objects(a_objs)
+        b_objs[1] = apply_rotation(b_objs[1], np.array([0.0, delta, 0.0]))
+        c_objs = clone_objects(b_objs)
+        c_objs[1] = apply_rotation(c_objs[1], np.array([0.0, delta, 0.0]))
+        scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
+        v = [ang(*pair) for pair in [[a_objs[0], a_objs[1]], [b_objs[0], b_objs[1]], [c_objs[0], c_objs[1]]]]
+        meta = build_rule_meta(
+            self, "R2", 2, involved, ["R"], ["ang(0,1)"], "arithmetic", {"delta": delta}, v, scenes
+        )
+        return scenes[0], scenes[1], scenes[2], meta
 
 
 @dataclass
-class M07AxisAngleLinear(Rule):
+class M08AreaArithmetic(Rule):
     def __init__(self) -> None:
-        super().__init__("M07", RuleDifficulty.MEDIUM, "Axis Angle Linear", "Axis angle changes gradually")
+        super().__init__("M08", RuleDifficulty.MEDIUM, "三对象面积等差", "三点面积等差变化")
 
     def sample_params(self, rng) -> Dict:
-        delta = float(rng.uniform(math.pi / 18, math.pi / 8))
-        base_angle = float(rng.uniform(-math.pi / 6, math.pi / 6))
-        return {"delta": delta, "base_angle": base_angle}
+        delta_ratio = float(rng.uniform(0.15, 0.35)) * (1 if rng.random() < 0.5 else -1)
+        return {"delta_ratio": delta_ratio}
 
     def generate_triplet(self, params, rng):
-        delta = params["delta"]
-        base_angle = params["base_angle"]
-        obj1 = Cylinder(center=np.array([-0.5, 0, 0]), rotation=np.array([0, base_angle, 0]), radius=0.2, height=1.3)
-        obj2 = Cylinder(center=np.array([0.5, 0, 0]), rotation=np.array([0, -base_angle, 0]), radius=0.2, height=1.3)
-        b1 = apply_rotation(obj1, np.array([0, delta, 0]))
-        b2 = apply_rotation(obj2, np.array([0, -delta, 0]))
-        c1 = apply_rotation(b1, np.array([0, delta, 0]))
-        c2 = apply_rotation(b2, np.array([0, -delta, 0]))
-        return Scene([obj1, obj2]), Scene([b1, b2]), Scene([c1, c2]), params
+        objs = init_objects(rng, 3, m=3)
+        involved = [0, 1, 2]
+        # Fix base edge on x 轴，控制高度即可精准调节面积
+        base_len = 1.0
+        objs[0].p = np.array([-base_len / 2, 0, 0])
+        objs[1].p = np.array([base_len / 2, 0, 0])
+        height1 = float(rng.uniform(0.4, 0.8))
+        objs[2].p = np.array([0.0, height1, 0.0])
+        area1 = 0.5 * base_len * height1
+        delta = area1 * params["delta_ratio"]
+        area2 = area1 + delta
+        area3 = area1 + 2 * delta
+        height2 = 2 * area2 / base_len
+        height3 = 2 * area3 / base_len
+
+        b_objs = clone_objects(objs)
+        b_objs[2].p = np.array([0.0, height2, 0.0])
+        c_objs = clone_objects(objs)
+        c_objs[2].p = np.array([0.0, height3, 0.0])
+        scenes = [scene_from_objects(x) for x in [objs, b_objs, c_objs]]
+        v = [self._area(s.objects) for s in scenes]
+        meta = build_rule_meta(
+            self,
+            "R3",
+            3,
+            involved,
+            ["p"],
+            ["area(0,1,2)"],
+            "arithmetic",
+            {"delta": delta},
+            v,
+            scenes,
+        )
+        return scenes[0], scenes[1], scenes[2], meta
+    
+    @staticmethod
+    def _area(objs: Sequence) -> float:
+        return float(0.5 * np.linalg.norm(np.cross(objs[1].p - objs[0].p, objs[2].p - objs[0].p)))
 
 
 @dataclass
-class M08AxesSymmetry(Rule):
+class M09DistanceDifferenceConserved(Rule):
     def __init__(self) -> None:
-        super().__init__("M08", RuleDifficulty.MEDIUM, "Axes Symmetry", "Maintain mirror symmetry")
+        super().__init__("M09", RuleDifficulty.MEDIUM, "距离差分守恒", "两对距离差保持常数")
 
     def sample_params(self, rng) -> Dict:
-        distance = float(rng.uniform(0.4, 0.8))
-        scale = float(rng.uniform(0.8, 1.3))
-        return {"distance": distance, "scale": scale}
+        constant = float(rng.uniform(0.2, 0.5))
+        step = float(rng.uniform(0.1, 0.25))
+        return {"constant": constant, "step": step}
 
     def generate_triplet(self, params, rng):
-        distance = params["distance"]
-        scale = params["scale"]
-        obj_l = Cone(center=np.array([-distance, 0, 0]), rotation=np.array([0, 0, 0]), radius=0.3, height=1.0)
-        obj_r = Cone(center=np.array([distance, 0, 0]), rotation=np.array([0, 0, math.pi]), radius=0.3, height=1.0)
-        a = Scene([obj_l, obj_r])
-        b = Scene([apply_scale(obj_l, scale), apply_scale(obj_r, scale)])
-        c = Scene([apply_scale(obj_l, scale * scale), apply_scale(obj_r, scale * scale)])
-        return a, b, c, params
+        c_val, step = params["constant"], params["step"]
+        objs = init_objects(rng, 3, m=3)
+        involved = [0, 1, 2]
+        direction_vec = _unit_vector(rng)
+        base_dist = float(rng.uniform(0.7, 1.0))
+        d1 = base_dist
+        d2 = max(0.3, base_dist - c_val)
+
+        def place(d01: float, d12: float):
+            o0, o1, o2 = clone_objects(objs)
+            o1.p = np.zeros(3)
+            o0.p = -direction_vec * d01
+            o2.p = direction_vec * d12
+            return [o0, o1, o2]
+
+        scenes_objs = [
+            place(d1, d2),
+            place(d1 + step, d2 + step),
+            place(d1 + 2 * step, d2 + 2 * step),
+        ]
+        scenes = [scene_from_objects(x) for x in scenes_objs]
+        v = [dist(pair[0], pair[1]) - dist(pair[1], pair[2]) for pair in scenes_objs]
+        meta = build_rule_meta(
+            self,
+            "R2",
+            3,
+            involved,
+            ["p"],
+            ["dist(0,1)-dist(1,2)"],
+            "conservation",
+            {"constant": c_val},
+            v,
+            scenes,
+        )
+        return scenes[0], scenes[1], scenes[2], meta
 
 
 @dataclass
-class M09DistanceLinear(Rule):
+class M10OrderingCycle(Rule):
     def __init__(self) -> None:
-        super().__init__("M09", RuleDifficulty.MEDIUM, "Distance Linear Change", "Distance between objects changes linearly")
+        super().__init__("M10", RuleDifficulty.MEDIUM, "排序模式循环", "沿 x 轴顺序循环")
 
     def sample_params(self, rng) -> Dict:
-        direction = unit_vector(rng)
-        base_dist = float(rng.uniform(0.5, 1.0))
-        step = float(rng.uniform(0.2, 0.4))
-        return {"direction": direction.tolist(), "base_distance": base_dist, "step": step}
+        return {}
 
     def generate_triplet(self, params, rng):
-        direction = np.array(params["direction"])
-        base_dist = params["base_distance"]
-        step = params["step"]
-        obj1 = Sphere(center=-direction * base_dist / 2, radius=0.35)
-        obj2 = Sphere(center=direction * base_dist / 2, radius=0.35)
-        a = Scene([obj1, obj2])
-        b = Scene([apply_translation(obj1, -direction * step / 2), apply_translation(obj2, direction * step / 2)])
-        c = Scene([apply_translation(obj1, -direction * step), apply_translation(obj2, direction * step)])
-        return a, b, c, params
+        objs = init_objects(rng, 3, m=3)
+        involved = [0, 1, 2]
+        base_positions = [-0.8, 0.0, 0.8]
+        perms = [[0, 1, 2], [1, 2, 0], [2, 0, 1]]
+
+        def assign(ordering: List[int]):
+            arranged = clone_objects(objs)
+            for rank, obj_idx in enumerate(ordering):
+                arranged[obj_idx].p[0] = base_positions[rank]
+            return arranged
+
+        scenes_objs = [assign(p) for p in perms]
+        scenes = [scene_from_objects(x) for x in scenes_objs]
+        v = [order_indices_x(s.objects) for s in scenes]
+        meta = build_rule_meta(
+            self,
+            "R3",
+            3,
+            involved,
+            ["p"],
+            ["ord_x(S)"],
+            "discrete",
+            {"permutation": perms},
+            v,
+            scenes,
+        )
+        return scenes[0], scenes[1], scenes[2], meta
 
 
 @dataclass
-class M10PatternMovement(Rule):
+class M11CentroidArithmetic(Rule):
     def __init__(self) -> None:
-        super().__init__("M10", RuleDifficulty.MEDIUM, "Pattern Movement", "Group moves maintaining formation")
+        super().__init__("M11", RuleDifficulty.MEDIUM, "集合质心等差平移", "集合质心等差")
 
     def sample_params(self, rng) -> Dict:
-        direction = unit_vector(rng)
-        step = float(rng.uniform(0.3, 0.6))
-        return {"direction": direction.tolist(), "step": step}
+        delta = rng.uniform(0.2, 0.4, size=3) * rng.choice([-1, 1], size=3)
+        return {"delta": delta.tolist()}
 
     def generate_triplet(self, params, rng):
-        direction = np.array(params["direction"])
-        step = params["step"]
-        objs = []
-        for i in range(3):
-            center = np.array([i * 0.6 - 0.6, 0, 0]) + rng.uniform(-0.1, 0.1, size=3)
-            objs.append(Sphere(center=center, radius=0.25))
-        a = Scene(objs)
-        b = Scene([apply_translation(o, direction * step) for o in objs])
-        c = Scene([apply_translation(o, direction * step * 2) for o in objs])
-        return a, b, c, params
+        delta = np.array(params["delta"])
+        objs = init_objects(rng, 3, m=3)
+        involved = [0, 1, 2]
+        a_objs = clone_objects(objs)
+        b_objs = [apply_translation(o, delta) for o in objs]
+        c_objs = [apply_translation(o, delta * 2) for o in objs]
+        scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
+        v = [centroid(s.objects) for s in scenes]
+        meta = build_rule_meta(
+            self, "R3", 3, involved, ["p"], ["cent(S)"], "arithmetic", {"delta": delta.tolist()}, v, scenes
+        )
+        return scenes[0], scenes[1], scenes[2], meta
 
 
 @dataclass
-class M11HierarchyPreserved(Rule):
+class M12DistanceVectorGeometric(Rule):
     def __init__(self) -> None:
-        super().__init__("M11", RuleDifficulty.MEDIUM, "Hierarchy Preserved", "Smaller object attached to larger one")
+        super().__init__("M12", RuleDifficulty.MEDIUM, "距离集合等比缩放", "三对距离成等比")
 
     def sample_params(self, rng) -> Dict:
-        offset = rng.uniform(0.3, 0.6, size=3)
-        return {"offset": offset.tolist()}
+        k = float(rng.uniform(1.15, 1.5))
+        return {"k": k}
 
     def generate_triplet(self, params, rng):
-        offset = np.array(params["offset"])
-        base = Cylinder(center=np.zeros(3), radius=0.35, height=1.2)
-        attached = Sphere(center=offset, radius=0.25)
-        delta = rng.uniform(-0.1, 0.1, size=3)
-        a = Scene([base, attached])
-        b = Scene([apply_translation(base, delta), apply_translation(attached, delta)])
-        c = Scene([apply_translation(base, delta * 2), apply_translation(attached, delta * 2)])
-        return a, b, c, params
+        k = params["k"]
+        objs = init_objects(rng, 3, m=3)
+        involved = [0, 1, 2]
+        base_cent = centroid(objs)
+
+        def scale_positions(objs_in: Sequence, factor: float):
+            scaled = []
+            for o in objs_in:
+                new_o = o.copy()
+                new_o.p = base_cent + (o.p - base_cent) * factor
+                scaled.append(new_o)
+            return scaled
+
+        a_objs = clone_objects(objs)
+        b_objs = scale_positions(objs, k)
+        c_objs = scale_positions(b_objs, k)
+        scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
+
+        def dist_vec(objects: Sequence) -> List[float]:
+            return [dist(objects[0], objects[1]), dist(objects[0], objects[2]), dist(objects[1], objects[2])]
+
+        v = [dist_vec(s.objects) for s in scenes]
+        meta = build_rule_meta(
+            self,
+            "R3",
+            3,
+            involved,
+            ["p"],
+            ["dist-set"],
+            "geometric",
+            {"k": k},
+            v,
+            scenes,
+        )
+        return scenes[0], scenes[1], scenes[2], meta
 
 
 @dataclass
-class M12CompositeRatio(Rule):
+class M13SymmetrySwitch(Rule):
     def __init__(self) -> None:
-        super().__init__("M12", RuleDifficulty.MEDIUM, "Composite Ratio", "Size and distance change with a shared ratio")
+        super().__init__("M13", RuleDifficulty.MEDIUM, "对称性开关", "sym 序列 0→1→1")
 
     def sample_params(self, rng) -> Dict:
-        ratio = float(rng.uniform(1.1, 1.5))
-        return {"ratio": ratio}
+        return {}
 
     def generate_triplet(self, params, rng):
-        ratio = params["ratio"]
-        obj1 = Cube(center=np.array([-0.5, 0, 0]), edge_lengths=np.array([0.6, 0.6, 0.6]))
-        obj2 = Cube(center=np.array([0.5, 0, 0]), edge_lengths=np.array([0.6, 0.6, 0.6]))
-        a = Scene([obj1, obj2])
-        b = Scene([apply_scale(obj1, ratio), apply_translation(apply_scale(obj2, ratio), np.array([ratio * 0.3, 0, 0]))])
-        c = Scene([apply_scale(obj1, ratio * ratio), apply_translation(apply_scale(obj2, ratio * ratio), np.array([ratio * 0.6, 0, 0]))])
-        return a, b, c, params
+        objs = init_objects(rng, 2, m=2)
+        involved = [0, 1]
+        base_offset = rng.uniform(0.5, 0.8)
+        a_objs = clone_objects(objs)
+        a_objs[0].p = np.array([-base_offset, 0.2, 0])
+        a_objs[1].p = np.array([base_offset, -0.1, 0])
+
+        b_objs = clone_objects(objs)
+        b_objs[0].p = np.array([-base_offset, 0, 0])
+        b_objs[1].p = np.array([base_offset, 0, 0])
+
+        c_objs = clone_objects(b_objs)
+        scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
+        v = [symmetry_flag(s.objects, axis_name="y") for s in scenes]
+        meta = build_rule_meta(
+            self,
+            "R3",
+            2,
+            involved,
+            ["p"],
+            ["sym(S)"],
+            "discrete",
+            {"sequence": [0, 1, 1]},
+            v,
+            scenes,
+        )
+        return scenes[0], scenes[1], scenes[2], meta
 
 
 @dataclass
-class M13Alignment(Rule):
+class M14DualSizeConservation(Rule):
     def __init__(self) -> None:
-        super().__init__("M13", RuleDifficulty.MEDIUM, "Alignment", "Face -> edge -> vertex alignment sequence")
+        super().__init__("M14", RuleDifficulty.MEDIUM, "双对象属性联动", "size 和保持守恒")
 
     def sample_params(self, rng) -> Dict:
-        return {"offset": float(rng.uniform(0.3, 0.7))}
+        delta_ratio = float(rng.uniform(0.1, 0.25))
+        sign = 1 if rng.random() < 0.5 else -1
+        return {"delta_ratio": delta_ratio * sign}
 
     def generate_triplet(self, params, rng):
-        offset = params["offset"]
-        cube1 = Cube(center=np.zeros(3), edge_lengths=np.array([0.8, 0.8, 0.8]))
-        cube2 = Cube(center=np.array([offset, 0, 0]), edge_lengths=np.array([0.6, 0.6, 0.6]))
-        a = Scene([cube1, cube2])
-        # Edge align by moving along diagonal on face.
-        b = Scene([cube1, Cube(center=np.array([offset, offset, 0]), edge_lengths=cube2.edge_lengths)])
-        # Vertex align at full diagonal.
-        c = Scene([cube1, Cube(center=np.array([offset, offset, offset]), edge_lengths=cube2.edge_lengths)])
-        return a, b, c, params
+        objs = init_objects(rng, 2, m=2)
+        involved = [0, 1]
+        s0, s1 = size(objs[0]), size(objs[1])
+        total = s0 + s1
+        delta = s0 * params["delta_ratio"]
 
+        def resize_pair(base0, base1, delta_val):
+            target0 = base0 + delta_val
+            target1 = total - target0
+            f0 = (target0 / base0) ** (1 / 3)
+            f1 = (target1 / base1) ** (1 / 3)
+            o0 = apply_scale(objs[0], f0)
+            o1 = apply_scale(objs[1], f1)
+            return [o0, o1]
 
-@dataclass
-class M14ShapeFamily(Rule):
-    def __init__(self) -> None:
-        super().__init__("M14", RuleDifficulty.MEDIUM, "Shape Family Relation", "Morph within a shape family")
-
-    def sample_params(self, rng) -> Dict:
-        stretch = float(rng.uniform(1.2, 1.6))
-        return {"stretch": stretch}
-
-    def generate_triplet(self, params, rng):
-        stretch = params["stretch"]
-        sphere = Sphere(center=np.zeros(3), radius=0.45)
-        ellipsoid = apply_scale(sphere, (stretch, 1.0, 1.0))
-        a = Scene([sphere])
-        b = Scene([ellipsoid])
-        c = Scene([sphere])
-        return a, b, c, params
+        a_objs = clone_objects(objs)
+        b_objs = resize_pair(s0, s1, delta)
+        c_objs = resize_pair(s0 + delta, s1 - delta, delta)
+        scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
+        v = [[size(o0), size(o1)] for o0, o1 in [a_objs, b_objs, c_objs]]
+        meta = build_rule_meta(
+            self,
+            "R1",
+            2,
+            involved,
+            ["r"],
+            ["size(0)", "size(1)"],
+            "coupled",
+            {"total": total},
+            v,
+            scenes,
+        )
+        return scenes[0], scenes[1], scenes[2], meta
 
 
 def build_medium_rules() -> List[Rule]:
     return [
-        M01SeparateTouchIntersect(),
-        M02IntersectionDepthGrowth(),
-        M03Containment(),
-        M04RelativePosition(),
-        M05CenterOfMassShift(),
-        M06ParallelPerpendicular(),
-        M07AxisAngleLinear(),
-        M08AxesSymmetry(),
-        M09DistanceLinear(),
-        M10PatternMovement(),
-        M11HierarchyPreserved(),
-        M12CompositeRatio(),
-        M13Alignment(),
-        M14ShapeFamily(),
+        M01DistanceArithmetic(),
+        M02DistanceGeometric(),
+        M03DirectionLocked(),
+        M04DirectionRotate(),
+        M05TouchSequence(),
+        M06ContainSequence(),
+        M07AngleArithmetic(),
+        M08AreaArithmetic(),
+        M09DistanceDifferenceConserved(),
+        M10OrderingCycle(),
+        M11CentroidArithmetic(),
+        M12DistanceVectorGeometric(),
+        M13SymmetrySwitch(),
+        M14DualSizeConservation(),
     ]

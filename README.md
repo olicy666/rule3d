@@ -1,6 +1,6 @@
-# 三宫格点云数据集生成器
+# Rule3D：基于规则的多几何体点云推理数据集生成器（数学原型版）
 
-本项目实现了 `program.md` 描述的三步点云生成系统。支持四种基础几何体、40 条可插拔规则、按难度概率采样，输出六张点云（A/B 参考 + C/D/E/F 选项，其中仅一张正确）及 meta 信息。
+本项目实现 `program.md` 中的“数学原型”版生成器：每题输出 6 个点云（1/2 为参考帧 A/B，3/4/5/6 为四个候选，其中仅 1 个正确）和 `meta.json`，同时根目录提供所有题目的 `meta.json` 列表。规则总数 36（移除 R4 拓扑类），每帧场景由 2~3 个几何体组成。
 
 ## 快速开始
 环境：Python 3.10+，依赖仅 `numpy`。
@@ -11,70 +11,98 @@ python main.py --output output --num-samples 3 --points 4096 --seed 0
 生成目录示例：
 ```
 output/sample_000000/
-    1.ply
-    2.ply
-    3.ply
-    4.ply
-    5.ply
-    6.ply
-    meta.json  # 当前题目的路径与答案（同下方 meta 列表格式）
-output/meta.json  # 所有题目组成的列表
-                 # 每个 meta 中包含 rule_id 以便回溯规则
+    1.ply  # A
+    2.ply  # B
+    3.ply  # 候选 A
+    4.ply  # 候选 B
+    5.ply  # 候选 C
+    6.ply  # 候选 D
+    meta.json  # 含文件路径、正确选项、rule_meta
+output/meta.json  # 所有题目的 meta 列表
 ```
 
-## 常用参数
-- `--output`：输出根目录，默认 `output`
-- `--num-samples`：生成多少道题目（多少个样本目录）
-- `--points`：每个点云的点数，默认 4096
-- `--seed`：固定随机种子
-- `--simple-prob` / `--medium-prob` / `--complex-prob`：三种难度的采样概率，默认 0.7 / 0.2 / 0.1
-- `--mode`：规则采样模式，默认 `main`。可选 `r1-only`/`r2-only`/`r3-only`/`r4-only` 四大类，`r1-1`~`r3-2` 子类，以及消融的 `all-minus-rX`（详见 `program.md` 的四种模式说明）。
+## 数学对象定义
+- 场景帧：$$X_t = \{O_{t,1}, \dots, O_{t,M_t}\},\quad M_t \in \{2,3\}$$
+- 物体基础属性：$$s \in \{\texttt{cube},\texttt{sphere},\texttt{cylinder},\texttt{cone}\},\quad r=(r_x,r_y,r_z),\quad p\in\mathbb{R}^3,\quad R\in SO(3),\quad d\in\mathbb{R}_+$$
+- 采样：按权重 $$w_i = d_i\cdot\text{vol}(r_i)$$ 分配总点数到各物体，合并后写入同一 ply；meta 中保留对象级参数。
 
-说明：A/B/C/D 选项的正确答案位置是均衡分布的（例如 100 题时四个选项各 25 次）。文件名映射：参考 1/2，对应候选 3/4/5/6，A/B/C/D 分别指向 3/4/5/6。
+## 派生函数（仅依赖 (s,r,p,R,d)）
+- 单体：$$\text{size}(O)=r_x r_y r_z,\quad \text{ar}(O)=(\tfrac{r_x}{r_y},\tfrac{r_y}{r_z}),\quad \text{axis}_k(O)=R e_k,\quad \text{den}(O)=d$$
+- 成对：$$\text{dist}(i,j)=\|p_i-p_j\|_2,\quad \text{dir}(i,j)=\tfrac{p_j-p_i}{\|p_j-p_i\|_2+\epsilon},\quad \text{ang}(i,j)=\arccos(\langle\text{axis}_1(i),\text{axis}_1(j)\rangle)$$
+  $$\text{touch}(i,j)=\mathbf{1}[\text{dist}\le \rho_i+\rho_j+\tau],\quad \text{contain}(i,j)=\mathbf{1}[\text{AABB}(i)\supseteq\text{AABB}(j)]$$
+- 多体：$$\text{cent}(S)=\tfrac{1}{|S|}\sum_{i\in S}p_i,\quad \text{area}(1,2,3)=\tfrac{1}{2}\|(p_2-p_1)\times(p_3-p_1)\|$$
+  $$\text{ord}_x(S)=\text{argsort}([p_{i,x}]),\quad \text{sym}(S)=\mathbf{1}[\forall i\,\exists j:\|p_j-\pi_n(p_i)\|\le\delta]$$
 
-## 运行指令示例（覆盖四类模式）
-- 主模式（40 条规则随机，答案均衡）：`python main.py --output output --num-samples 100 --mode main`
+## 模式变换（可枚举）
+- 等差：$$v_{t+1}-v_t=\Delta\ \Rightarrow\ v_3=2v_2-v_1$$
+- 等比：$$v_{t+1}=k\odot v_t\ \Rightarrow\ v_3=k\odot v_2$$
+- 离散序列：固定符号序列 (ABA/ABC/等)。
+- 刚体/仿射：$$p_{t+1}=Q p_t + t,\quad R_{t+1}=Q R_t$$
+- 联动：多变量守恒/耦合（质心恒定、距离和恒定等）。
 
-- 单大类模式：
-  - R1 物体属性：`python main.py --num-samples 50 --mode r1-only`
-  - R2 成对空间关系：`python main.py --num-samples 50 --mode r2-only`
-  - R3 多物体构型：`python main.py --num-samples 50 --mode r3-only`
-  - R4 结构与拓扑：`python main.py --num-samples 50 --mode r4-only`
+## 规则清单（36 条：14 Simple + 14 Medium + 8 Complex）
+所有规则 meta 包含 `rule_id, rule_group(R1/R2/R3), difficulty, K_R, involved_indices, base_attrs_used, derived_funcs, pattern_type, pattern_params, v1/v2/v3`。
 
-- 大类内子类模式：
-  - R1-1 尺度/比例：`python main.py --num-samples 20 --mode r1-1`
-  - R1-2 位姿（旋转/平移）：`python main.py --num-samples 20 --mode r1-2`
-  - R1-3 外观/密度/恒等：`python main.py --num-samples 20 --mode r1-3`
-  - R1-4 复合联动序列：`python main.py --num-samples 20 --mode r1-4`
-  - R2-1 拓扑强度：`python main.py --num-samples 20 --mode r2-1`
-  - R2-2 度量/方向：`python main.py --num-samples 20 --mode r2-2`
-  - R3-1 全局对称与身份：`python main.py --num-samples 20 --mode r3-1`
-  - R3-2 群体组织高阶构型：`python main.py --num-samples 20 --mode r3-2`
+### R1 物体属性推理（S01–S14 + M14 + C01–C03）
+- **S01 等比统一缩放**：$$r_2=k r_1,\ r_3=k r_2$$
+- **S02 等差统一缩放**：$$\text{size}_2-\text{size}_1=\Delta,\ \text{size}_3=2\text{size}_2-\text{size}_1$$
+- **S03 单轴比例等比**：$$r_{2,x}=k r_{1,x},\ r_{3,x}=k r_{2,x}$$
+- **S04 各向异性比例切换**：$$(\text{ar}_1,\text{ar}_2,\text{ar}_3)=(c_1,c_2,c_1)$$
+- **S05 固定轴旋转**：$$R_{t+1}=R_t\cdot\text{Rot}(\hat{u},\theta)$$
+- **S06 旋转离散循环**：$$(R_1,R_2,R_3)=(Q_0,Q_{90},Q_{180})$$
+- **S07 固定向量平移**：$$p_{t+1}=p_t+\Delta p$$
+- **S08 平移离散开关**：$$(p_1,p_2,p_3)=(c_1,c_2,c_1)$$
+- **S09 密度等差**：$$d_2-d_1=\Delta,\ d_3=2d_2-d_1$$
+- **S10 密度等比**：$$d_2=k d_1,\ d_3=k d_2$$
+- **S11 形状替换 ABA**：$$(s_1,s_2,s_3)=(a,b,a)$$
+- **S12 形状替换 ABC**：$$(s_1,s_2,s_3)=(a,b,c),\ a\neq b\neq c$$
+- **S13 尺度-位置联动**：$$\text{cent}(S_t)=\text{const},\ r_{t+1}=k r_t,\ p_{t+1}=p_t+\delta p$$
+- **S14 恒等**：$$(s,r,p,R,d)_1=(s,r,p,R,d)_2=(s,r,p,R,d)_3$$
+- **M14 双对象守恒**：$$\text{size}(i)_t+\text{size}(j)_t=C,\ \text{size}(i)\ \text{递增},\ \text{size}(j)\ \text{递减}$$
+- **C01 复合属性**：$$r_{t+1}=k r_t,\ R_{t+1}=R_t\text{Rot}(\hat{u},\theta)$$
+- **C02 分段序列**：$$v_2=v_1+\Delta,\ v_3=v_2$$
+- **C03 条件触发**：$$s_2\ne s_1\Rightarrow \text{size}_2=k\text{size}_1,\ s_3=s_2\Rightarrow \text{size}_3=\text{size}_2$$
 
-- 消融模式（去掉一个大类）：
-  - 去掉 R1：`python main.py --num-samples 30 --mode all-minus-r1`
-  - 去掉 R2：`python main.py --num-samples 30 --mode all-minus-r2`
-  - 去掉 R3：`python main.py --num-samples 30 --mode all-minus-r3`
-  - 去掉 R4：`python main.py --num-samples 30 --mode all-minus-r4`
+### R2 成对空间关系推理（M01–M07 + M09 + C10–C11）
+- **M01 成对距离等差**：$$\text{dist}_3=2\text{dist}_2-\text{dist}_1$$
+- **M02 成对距离等比**：$$\text{dist}_2=k\text{dist}_1,\ \text{dist}_3=k\text{dist}_2$$
+- **M03 方向保持**：$$\text{dir}_1=\text{dir}_2=\text{dir}_3,\ \text{dist}\ \text{线性/等比}$$
+- **M04 方向旋转等差角**：$$\angle(\text{dir}_t,\text{dir}_{t+1})=\theta,\ \text{dist}\ \text{恒定}$$
+- **M05 接触序列**：$$(\text{touch}_1,\text{touch}_2,\text{touch}_3)=(0,1,1)$$
+- **M06 包含序列**：$$(\text{contain}_1,\text{contain}_2,\text{contain}_3)=(0,1,0)$$
+- **M07 夹角等差**：$$\text{ang}_3=2\text{ang}_2-\text{ang}_1$$
+- **M09 距离差分守恒**：$$\text{dist}(i,j)-\text{dist}(k,l)=C,\ \forall t$$
+- **C10 刚体一致变换**：集合施加相同刚体，任意成对距离保持不变。
+- **C11 相对姿态保持**：共同旋转 $$R^{(i)}_{t+1}=Q R^{(i)}_t$$，夹角恒定。
 
-可选参数：`--points` 控制点数，`--seed` 固定随机性，`--simple-prob/--medium-prob/--complex-prob` 调整难度比例（在当前模式可用规则内按概率抽样）。
+### R3 多物体构型推理（M08 + M10–M13 + C08–C09 + C12）
+- **M08 三对象面积等差**：$$\text{area}_3=2\text{area}_2-\text{area}_1$$
+- **M10 排序模式循环**：$$\text{ord}_x(S_1),\text{ord}_x(S_2),\text{ord}_x(S_3)\ \text{按固定置换}$$
+- **M11 集合质心等差**：$$c_{t+1}=c_t+\Delta c$$
+- **M12 距离集合等比**：$$v_{t+1}=k v_t,\ v_t=[\text{dist}(1,2),\text{dist}(1,3),\text{dist}(2,3)]$$
+- **M13 对称性开关**：$$(\text{sym}_1,\text{sym}_2,\text{sym}_3)=(0,1,1)$$
+- **C08 对称+刚体**：$\text{sym}(S_2)=1,\ X_3=Q X_2+t$
+- **C09 组间质心距离等差**：$$u_t=\|\text{cent}(S_a)-\text{cent}(S_b)\|,\ u_3=2u_2-u_1$$
+- **C12 面积-边长守恒**：$$\text{area}(1,2,3)\cdot \text{dist}(1,2)=C$$
 
-示例：只生成复杂题目 5 道
-```bash
-python main.py --num-samples 5 --simple-prob 0 --medium-prob 0 --complex-prob 1 --mode r4-only
-```
+## 模式与参数
+- `--mode` 可选：
+  - 主集合：`main`
+  - 大类：`r1-only`, `r2-only`, `r3-only`
+  - 消融：`all-minus-r1`, `all-minus-r2`, `all-minus-r3`
+  - （已删除 `r4-only` 与 `all-minus-r4`）
+- 难度权重：`--simple-prob / --medium-prob / --complex-prob`，默认 0.7 / 0.2 / 0.1。
+- 其他：`--output`, `--num-samples`, `--points`, `--seed`。
+示例：`python main.py --num-samples 10 --mode r2-only --points 4096`
 
-## 规则体系（40 条,具体规则见rule.md文档）
-- Simple（14）：S01~S14（尺度/单轴/统一缩放、固定轴旋转、三轴旋转、平移、二段平移、形状替换、固定形状比例变化、密度感变化、竖向递增、重心补偿缩放、绕固定点旋转、恒等）
-- Medium（14）：M01~M14（分离→接触→相交、相交深度增长、包含、相对位置、重心偏移、平行/垂直、轴角度变化、镜像对称、距离线性、队形移动、附着层级、比例耦合、面对齐→边对齐→点对齐、形状家族）
-- Complex（12）：C01~C12（尺度+平移联动、旋转+尺度联动、多步序列、布尔序列、穿孔拓扑、隧道拓扑、截面拓扑、对称+缩放、角色互换、相交角度渐增、接触面积递增、多物体构型）
+## 被删除的规则与类目
+R4 结构与拓扑推理整类移除，`C04/C05/C06/C07` 不再生成，规则总数变为 36；所有 R4 相关模式从代码与文档中删除。
 
-## 目录结构与扩展
-- `main.py`：CLI 入口
-- `raven3d/geometry.py`：几何原语与表面采样
-- `raven3d/scene.py`：场景点云合成
-- `raven3d/rules/`：40 条规则，按难度拆分；`base.py` 为基类
-- `raven3d/factory.py`：默认规则注册
-- `raven3d/dataset.py`：数据集生成逻辑
+## 目录结构
+- `main.py`：CLI 入口与模式选择
+- `raven3d/scene.py`：`ObjectState`/`Scene` 多物体采样
+- `raven3d/rules/`：36 条规则（按 simple/medium/complex 划分）
+- `raven3d/dataset.py`：样本生成与 meta 写出
+- `program.md`：实施要求
 
-扩展新规则：在 `raven3d/rules/` 相应难度文件中添加 Rule 子类，并在 `factory.py` 中注册即可。
+扩展新规则时可复用 `rules/utils.py` 中的派生函数与 meta 构建工具。

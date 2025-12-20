@@ -2,352 +2,450 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Dict, Tuple
+from typing import Dict, List
 
 import numpy as np
 
 from .base import Rule, RuleDifficulty
 from .utils import (
+    SHAPES,
+    apply_density,
     apply_rotation,
     apply_scale,
     apply_translation,
-    primitive_from_config,
-    primitive_to_config,
-    random_primitive,
+    aspect_ratio,
+    axis,
+    build_rule_meta,
+    centroid,
+    clone_objects,
+    init_objects,
+    scene_from_objects,
+    size,
+    switch_shape,
 )
-from ..scene import Scene
-from ..geometry import rotation_matrix
 
 
 @dataclass
-class S01ScaleLinear(Rule):
+class S01ScaleGeometric(Rule):
     def __init__(self) -> None:
-        super().__init__("S01", RuleDifficulty.SIMPLE, "Scale Linear", "B = k*A, C = k*B")
+        super().__init__("S01", RuleDifficulty.SIMPLE, "等比统一缩放", "size 按等比增长或缩小")
 
     def sample_params(self, rng) -> Dict:
-        return {"k": float(rng.uniform(0.7, 1.4)), "base": primitive_to_config(random_primitive(rng))}
+        k = float(rng.uniform(1.15, 1.6) if rng.random() < 0.5 else rng.uniform(0.6, 0.85))
+        return {"k": k}
 
     def generate_triplet(self, params, rng):
-        base = primitive_from_config(params["base"])
         k = params["k"]
-        b = apply_scale(base, k)
-        c = apply_scale(b, k)
-        return Scene([base]), Scene([b]), Scene([c]), {"k": k, "base": params["base"]}
-
-
-@dataclass
-class S02SingleAxisStretch(Rule):
-    def __init__(self) -> None:
-        super().__init__("S02", RuleDifficulty.SIMPLE, "Single Axis Stretch", "Scale along one axis only")
-
-    def sample_params(self, rng) -> Dict:
-        axis = int(rng.integers(0, 3))
-        factor = float(rng.uniform(1.2, 1.8))
-        return {"axis": axis, "factor": factor, "base": primitive_to_config(random_primitive(rng))}
-
-    def generate_triplet(self, params, rng):
-        axis = params["axis"]
-        factor = params["factor"]
-        base = primitive_from_config(params["base"])
-        scale_vec = [1.0, 1.0, 1.0]
-        scale_vec[axis] = factor
-        b = apply_scale(base, tuple(scale_vec))
-        c = apply_scale(b, tuple(scale_vec))
-        return Scene([base]), Scene([b]), Scene([c]), params
-
-
-@dataclass
-class S03UniformScaling(Rule):
-    def __init__(self) -> None:
-        super().__init__("S03", RuleDifficulty.SIMPLE, "Uniform Scaling", "Global uniform scaling A->B->C")
-
-    def sample_params(self, rng) -> Dict:
-        k = float(rng.uniform(0.8, 1.5))
-        return {"k": k, "base": primitive_to_config(random_primitive(rng))}
-
-    def generate_triplet(self, params, rng):
-        base = primitive_from_config(params["base"])
-        k = params["k"]
-        b = apply_scale(base, k)
-        c = apply_scale(b, k)
-        return Scene([base]), Scene([b]), Scene([c]), params
-
-
-@dataclass
-class S04FixedAxisRotation(Rule):
-    def __init__(self) -> None:
-        super().__init__("S04", RuleDifficulty.SIMPLE, "Fixed Axis Rotation", "Rotate around single axis by Δθ")
-
-    def sample_params(self, rng) -> Dict:
-        axis = int(rng.integers(0, 3))
-        # Larger step so旋转差异肉眼可见
-        delta = float(rng.uniform(math.pi / 6, math.pi / 3))
-        return {"axis": axis, "delta": delta, "base": primitive_to_config(random_primitive(rng))}
-
-    def generate_triplet(self, params, rng):
-        axis = params["axis"]
-        delta = params["delta"]
-        base = primitive_from_config(params["base"])
-        rot_vec = np.zeros(3)
-        rot_vec[axis] = delta
-        b = apply_rotation(base, rot_vec)
-        c = apply_rotation(b, rot_vec)
-        return Scene([base]), Scene([b]), Scene([c]), params
-
-
-@dataclass
-class S05FullEulerRotation(Rule):
-    def __init__(self) -> None:
-        super().__init__("S05", RuleDifficulty.SIMPLE, "Full Euler Rotation", "Increment all Euler angles")
-
-    def sample_params(self, rng) -> Dict:
-        # Bigger per-axis increments for显著姿态变化
-        delta = rng.uniform(math.pi / 8, math.pi / 3, size=3)
-        return {"delta": delta.tolist(), "base": primitive_to_config(random_primitive(rng))}
-
-    def generate_triplet(self, params, rng):
-        base = primitive_from_config(params["base"])
-        delta = np.array(params["delta"])
-        b = apply_rotation(base, delta)
-        c = apply_rotation(b, delta)
-        return Scene([base]), Scene([b]), Scene([c]), params
-
-
-@dataclass
-class S06Translation(Rule):
-    def __init__(self) -> None:
-        super().__init__("S06", RuleDifficulty.SIMPLE, "Translation", "Translate by constant vector d")
-
-    def sample_params(self, rng) -> Dict:
-        delta = rng.uniform(0.2, 0.6, size=3) * rng.choice([-1, 1], size=3)
-        return {"delta": delta.tolist(), "base": primitive_to_config(random_primitive(rng))}
-
-    def generate_triplet(self, params, rng):
-        base = primitive_from_config(params["base"])
-        delta = np.array(params["delta"])
-        b = apply_translation(base, delta)
-        c = apply_translation(b, delta)
-        return Scene([base]), Scene([b]), Scene([c]), params
-
-
-@dataclass
-class S07TwoStepTranslation(Rule):
-    def __init__(self) -> None:
-        super().__init__("S07", RuleDifficulty.SIMPLE, "Two-step Translation", "Two-step translation with scaled distance")
-
-    def sample_params(self, rng) -> Dict:
-        direction = rng.normal(size=3)
-        direction /= np.linalg.norm(direction) + 1e-9
-        # Use a larger base step so A/B/C 的平移差异在可视化上更明显
-        d1 = float(rng.uniform(0.6, 1.0))
-        ratio = float(rng.uniform(0.8, 1.5))
-        return {
-            "direction": direction.tolist(),
-            "d1": d1,
-            "ratio": ratio,
-            "base": primitive_to_config(random_primitive(rng)),
-        }
-
-    def generate_triplet(self, params, rng):
-        base = primitive_from_config(params["base"])
-        direction = np.array(params["direction"])
-        d1 = params["d1"]
-        ratio = params["ratio"]
-        delta1 = direction * d1
-        delta2 = direction * d1 * ratio
-        b = apply_translation(base, delta1)
-        c = apply_translation(b, delta2)
-        return Scene([base]), Scene([b]), Scene([c]), params
-
-
-@dataclass
-class S08ShapeSubstitution(Rule):
-    def __init__(self) -> None:
-        super().__init__("S08", RuleDifficulty.SIMPLE, "Shape Substitution", "Cycle shapes across steps")
-
-    def sample_params(self, rng) -> Dict:
-        center = rng.uniform(-0.3, 0.3, size=3)
-        rotation = rng.uniform(-math.pi / 8, math.pi / 8, size=3)
-        scale = rng.uniform(0.8, 1.2, size=3)
-        return {"center": center.tolist(), "rotation": rotation.tolist(), "scale": scale.tolist()}
-
-    def generate_triplet(self, params, rng):
-        center = np.array(params["center"])
-        rotation = np.array(params["rotation"])
-        scale = np.array(params["scale"])
-        shapes = ["sphere", "cylinder", "cone", "cube"]
-        start_idx = int(rng.integers(0, len(shapes)))
-
-        def make_shape(name: str):
-            if name == "sphere":
-                from ..geometry import Sphere
-
-                return Sphere(center=center, rotation=rotation, scale=scale, radius=0.45)
-            if name == "cylinder":
-                from ..geometry import Cylinder
-
-                return Cylinder(center=center, rotation=rotation, scale=scale, radius=0.35, height=0.9)
-            if name == "cone":
-                from ..geometry import Cone
-
-                return Cone(center=center, rotation=rotation, scale=scale, radius=0.35, height=1.0)
-            from ..geometry import Cube
-
-            return Cube(center=center, rotation=rotation, scale=scale, edge_lengths=np.array([0.8, 0.8, 0.8]))
-
-        a_shape = shapes[start_idx % len(shapes)]
-        b_shape = shapes[(start_idx + 1) % len(shapes)]
-        c_shape = shapes[(start_idx + 2) % len(shapes)]
-        a = make_shape(a_shape)
-        b = make_shape(b_shape)
-        c = make_shape(c_shape)
-        return (
-            Scene([a]),
-            Scene([b]),
-            Scene([c]),
-            {"sequence": [a_shape, b_shape, c_shape], "center": params["center"], "rotation": params["rotation"]},
+        objs = init_objects(rng, 1)
+        involved = [0]
+        a_objs = clone_objects(objs)
+        b_objs = clone_objects(objs)
+        b_objs[0] = apply_scale(b_objs[0], k)
+        c_objs = clone_objects(b_objs)
+        c_objs[0] = apply_scale(c_objs[0], k)
+        scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
+        v = [size(scenes[0].objects[0]), size(scenes[1].objects[0]), size(scenes[2].objects[0])]
+        meta = build_rule_meta(
+            self, "R1", 1, involved, ["r"], ["size(O0)"], "geometric", {"k": k}, v, scenes
         )
+        return scenes[0], scenes[1], scenes[2], meta
 
 
 @dataclass
-class S09ShapeConstantScaleChange(Rule):
+class S02ScaleArithmetic(Rule):
     def __init__(self) -> None:
-        super().__init__("S09", RuleDifficulty.SIMPLE, "Shape Constant Scale Change", "Shape fixed, per-axis scale changes")
+        super().__init__("S02", RuleDifficulty.SIMPLE, "等差统一缩放", "size 按等差递进")
 
     def sample_params(self, rng) -> Dict:
-        base = primitive_to_config(random_primitive(rng))
-        delta = rng.uniform(0.8, 1.4, size=3)
-        return {"base": base, "delta": delta.tolist()}
+        delta_ratio = float(rng.uniform(0.15, 0.35))
+        sign = -1.0 if rng.random() < 0.5 else 1.0
+        return {"delta_ratio": delta_ratio * sign}
 
     def generate_triplet(self, params, rng):
-        base = primitive_from_config(params["base"])
-        delta = np.array(params["delta"])
-        b = apply_scale(base, tuple(delta))
-        c = apply_scale(b, tuple(delta))
-        return Scene([base]), Scene([b]), Scene([c]), params
+        objs = init_objects(rng, 1)
+        involved = [0]
+        base_obj = objs[0]
+        base_size = size(base_obj)
+        delta = base_size * params["delta_ratio"]
+        target_b = base_size + delta
+        factor_b = (target_b / base_size) ** (1 / 3)
+        target_c = target_b + delta
+        factor_c = (target_c / target_b) ** (1 / 3)
+
+        a_objs = clone_objects(objs)
+        b_objs = clone_objects(objs)
+        b_objs[0] = apply_scale(b_objs[0], factor_b)
+        c_objs = clone_objects(b_objs)
+        c_objs[0] = apply_scale(c_objs[0], factor_c)
+        scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
+        v = [base_size, size(b_objs[0]), size(c_objs[0])]
+        meta = build_rule_meta(
+            self, "R1", 1, involved, ["r"], ["size(O0)"], "arithmetic", {"delta": delta}, v, scenes
+        )
+        return scenes[0], scenes[1], scenes[2], meta
 
 
 @dataclass
-class S10PointDensityChange(Rule):
+class S03SingleAxisGeometric(Rule):
     def __init__(self) -> None:
-        super().__init__("S10", RuleDifficulty.SIMPLE, "Point Density Change", "Apparent density increases")
+        super().__init__("S03", RuleDifficulty.SIMPLE, "单轴比例等比", "仅 x 轴按等比缩放")
 
     def sample_params(self, rng) -> Dict:
-        base = primitive_to_config(random_primitive(rng))
-        factors = sorted(rng.uniform(0.7, 1.2, size=3), reverse=True)
-        return {"base": base, "scale_factors": factors}
+        k = float(rng.uniform(1.1, 1.6) if rng.random() < 0.5 else rng.uniform(0.65, 0.9))
+        return {"k": k}
 
     def generate_triplet(self, params, rng):
-        base = primitive_from_config(params["base"])
-        f1, f2, f3 = params["scale_factors"]
-        # Larger scale -> lower apparent density, smaller -> higher density.
-        a = apply_scale(base, f1)
-        b = apply_scale(base, f2)
-        c = apply_scale(base, f3)
-        return Scene([a]), Scene([b]), Scene([c]), params
+        objs = init_objects(rng, 1)
+        involved = [0]
+        k = params["k"]
+        a_objs = clone_objects(objs)
+        b_objs = clone_objects(objs)
+        b_objs[0] = apply_scale(b_objs[0], k, axis_mask=[True, False, False])
+        c_objs = clone_objects(b_objs)
+        c_objs[0] = apply_scale(c_objs[0], k, axis_mask=[True, False, False])
+        scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
+        v = [aspect_ratio(o) for o in [a_objs[0], b_objs[0], c_objs[0]]]
+        meta = build_rule_meta(
+            self, "R1", 1, involved, ["r"], ["ar(O0)"], "geometric", {"k": k, "axis": "x"}, v, scenes
+        )
+        return scenes[0], scenes[1], scenes[2], meta
 
 
 @dataclass
-class S11PoseFixedSizeVertical(Rule):
+class S04AnisotropicToggle(Rule):
     def __init__(self) -> None:
-        super().__init__("S11", RuleDifficulty.SIMPLE, "Pose Fixed Vertical Growth", "Keep pose, grow size along vertical axis")
+        super().__init__("S04", RuleDifficulty.SIMPLE, "各向异性比例切换", "aspect ratio 在两种状态 ABA 切换")
 
     def sample_params(self, rng) -> Dict:
-        base = primitive_to_config(random_primitive(rng))
-        delta = float(rng.uniform(1.2, 1.6))
-        return {"base": base, "vertical_factor": delta}
+        factor = float(rng.uniform(1.3, 1.8))
+        return {"factor": factor}
 
     def generate_triplet(self, params, rng):
-        base = primitive_from_config(params["base"])
-        factor = params["vertical_factor"]
-        a = base
-        b = apply_scale(base, (1.0, 1.0, factor))
-        c = apply_scale(b, (1.0, 1.0, factor))
-        return Scene([a]), Scene([b]), Scene([c]), params
-
-
-@dataclass
-class S12DistanceScaleMatched(Rule):
-    def __init__(self) -> None:
-        super().__init__("S12", RuleDifficulty.SIMPLE, "Distance-Scale Matched", "Scale while compensating translation to keep centroid")
-
-    def sample_params(self, rng) -> Dict:
-        base = primitive_to_config(random_primitive(rng))
-        factor = float(rng.uniform(1.2, 1.8))
-        return {"base": base, "factor": factor}
-
-    def generate_triplet(self, params, rng):
-        base = primitive_from_config(params["base"])
+        objs = init_objects(rng, 1)
+        involved = [0]
         factor = params["factor"]
-        centroid = base.center
-        a = base
-        b = apply_scale(base, factor)
-        # Translate back so centroid stays close.
-        delta_b = centroid - rotation_matrix(base.rotation) @ (centroid * factor)
-        b.center = b.center + delta_b
-        c = apply_scale(b, factor)
-        delta_c = centroid - rotation_matrix(b.rotation) @ (centroid * factor)
-        c.center = c.center + delta_c
-        return Scene([a]), Scene([b]), Scene([c]), params
+        base = objs[0]
+        alt = apply_scale(base, factor, axis_mask=[True, False, False])
+
+        a_objs = [base.copy()]
+        b_objs = [alt]
+        c_objs = [base.copy()]
+        scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
+        v = [aspect_ratio(o) for o in [a_objs[0], b_objs[0], c_objs[0]]]
+        meta = build_rule_meta(
+            self, "R1", 1, involved, ["r"], ["ar(O0)"], "discrete", {"states": ["c1", "c2", "c1"]}, v, scenes
+        )
+        return scenes[0], scenes[1], scenes[2], meta
 
 
 @dataclass
-class S13SinglePrimitiveRotationFixedPoint(Rule):
+class S05FixedAxisRotation(Rule):
     def __init__(self) -> None:
-        super().__init__("S13", RuleDifficulty.SIMPLE, "Rotation Around Fixed Point", "Rotate around a fixed pivot")
+        super().__init__("S05", RuleDifficulty.SIMPLE, "固定轴旋转", "绕固定轴等差旋转")
 
     def sample_params(self, rng) -> Dict:
-        base = primitive_to_config(random_primitive(rng))
-        pivot = rng.uniform(-0.2, 0.2, size=3)
-        # Increase rotation to make pivoted spin明显
-        delta = rng.uniform(math.pi / 12, math.pi / 4, size=3)
-        return {"base": base, "pivot": pivot.tolist(), "delta": delta.tolist()}
+        axis_idx = int(rng.integers(0, 3))
+        theta = float(rng.uniform(math.pi / 10, math.pi / 5))
+        return {"axis": axis_idx, "theta": theta}
 
     def generate_triplet(self, params, rng):
-        base = primitive_from_config(params["base"])
-        pivot = np.array(params["pivot"])
+        objs = init_objects(rng, 1)
+        involved = [0]
+        axis_idx = params["axis"]
+        theta = params["theta"]
+        delta = np.zeros(3)
+        delta[axis_idx] = theta
+
+        a_objs = clone_objects(objs)
+        b_objs = clone_objects(objs)
+        b_objs[0] = apply_rotation(b_objs[0], delta)
+        c_objs = clone_objects(b_objs)
+        c_objs[0] = apply_rotation(c_objs[0], delta)
+        scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
+        v = [o.rotation[axis_idx] for o in [a_objs[0], b_objs[0], c_objs[0]]]
+        meta = build_rule_meta(
+            self, "R1", 1, involved, ["R"], [f"axis{axis_idx+1}(O0)"], "arithmetic", {"axis": axis_idx, "theta": theta}, v, scenes
+        )
+        return scenes[0], scenes[1], scenes[2], meta
+
+
+@dataclass
+class S06RotationDiscrete(Rule):
+    def __init__(self) -> None:
+        super().__init__("S06", RuleDifficulty.SIMPLE, "旋转状态离散循环", "0/90/180 度离散旋转")
+
+    def sample_params(self, rng) -> Dict:
+        axis_idx = int(rng.integers(0, 3))
+        return {"axis": axis_idx}
+
+    def generate_triplet(self, params, rng):
+        axis_idx = params["axis"]
+        objs = init_objects(rng, 1)
+        involved = [0]
+        base = objs[0]
+        deltas = [0.0, math.pi / 2, math.pi]
+        a_objs = [apply_rotation(base, self._delta_vec(axis_idx, deltas[0]))]
+        b_objs = [apply_rotation(base, self._delta_vec(axis_idx, deltas[1]))]
+        c_objs = [apply_rotation(base, self._delta_vec(axis_idx, deltas[2]))]
+        scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
+        v = [o.rotation[axis_idx] for o in [a_objs[0], b_objs[0], c_objs[0]]]
+        meta = build_rule_meta(
+            self,
+            "R1",
+            1,
+            involved,
+            ["R"],
+            [f"axis{axis_idx+1}(O0)"],
+            "discrete",
+            {"states_rad": deltas, "axis": axis_idx},
+            v,
+            scenes,
+        )
+        return scenes[0], scenes[1], scenes[2], meta
+
+    @staticmethod
+    def _delta_vec(axis_idx: int, angle: float) -> np.ndarray:
+        v = np.zeros(3)
+        v[axis_idx] = angle
+        return v
+
+
+@dataclass
+class S07TranslationArithmetic(Rule):
+    def __init__(self) -> None:
+        super().__init__("S07", RuleDifficulty.SIMPLE, "固定向量平移", "等差平移")
+
+    def sample_params(self, rng) -> Dict:
+        delta = rng.uniform(0.25, 0.5, size=3) * rng.choice([-1, 1], size=3)
+        return {"delta": delta.tolist()}
+
+    def generate_triplet(self, params, rng):
         delta = np.array(params["delta"])
-        a = base
-        b = apply_rotation(base, delta)
-        c = apply_rotation(b, delta)
-        # Recompute centers so pivot stays fixed.
-        def rotate_center(prim, total_delta):
-            rot = rotation_matrix(total_delta)
-            offset = prim.center - pivot
-            return pivot + (rot @ offset)
-
-        b.center = rotate_center(base, delta)
-        c.center = rotate_center(b, delta)
-        return Scene([a]), Scene([b]), Scene([c]), params
+        objs = init_objects(rng, 1)
+        involved = [0]
+        a_objs = clone_objects(objs)
+        b_objs = clone_objects(objs)
+        b_objs[0] = apply_translation(b_objs[0], delta)
+        c_objs = clone_objects(b_objs)
+        c_objs[0] = apply_translation(c_objs[0], delta)
+        scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
+        v = [a_objs[0].p.tolist(), b_objs[0].p.tolist(), c_objs[0].p.tolist()]
+        meta = build_rule_meta(
+            self, "R1", 1, involved, ["p"], ["p(O0)"], "arithmetic", {"delta": delta.tolist()}, v, scenes
+        )
+        return scenes[0], scenes[1], scenes[2], meta
 
 
 @dataclass
-class S14IdentityRule(Rule):
+class S08TranslationDiscrete(Rule):
     def __init__(self) -> None:
-        super().__init__("S14", RuleDifficulty.SIMPLE, "Identity", "A, B, C identical")
+        super().__init__("S08", RuleDifficulty.SIMPLE, "平移离散开关", "位置在两点间 ABA 切换")
 
     def sample_params(self, rng) -> Dict:
-        return {"base": primitive_to_config(random_primitive(rng))}
+        delta = rng.uniform(0.3, 0.6, size=3) * rng.choice([-1, 1], size=3)
+        return {"delta": delta.tolist()}
 
     def generate_triplet(self, params, rng):
-        base = primitive_from_config(params["base"])
-        return Scene([base]), Scene([base]), Scene([base]), params
+        delta = np.array(params["delta"])
+        objs = init_objects(rng, 1)
+        involved = [0]
+        base = objs[0]
+        alt = apply_translation(base, delta)
+        a_objs = [base.copy()]
+        b_objs = [alt]
+        c_objs = [base.copy()]
+        scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
+        v = [o.p.tolist() for o in [a_objs[0], b_objs[0], c_objs[0]]]
+        meta = build_rule_meta(
+            self, "R1", 1, involved, ["p"], ["p(O0)"], "discrete", {"positions": ["c1", "c2", "c1"]}, v, scenes
+        )
+        return scenes[0], scenes[1], scenes[2], meta
 
 
-def build_simple_rules():
+@dataclass
+class S09DensityArithmetic(Rule):
+    def __init__(self) -> None:
+        super().__init__("S09", RuleDifficulty.SIMPLE, "密度等差", "density 按等差变化")
+
+    def sample_params(self, rng) -> Dict:
+        delta_ratio = float(rng.uniform(0.1, 0.3))
+        sign = -1.0 if rng.random() < 0.5 else 1.0
+        return {"delta_ratio": delta_ratio * sign}
+
+    def generate_triplet(self, params, rng):
+        objs = init_objects(rng, 1)
+        involved = [0]
+        base = objs[0]
+        delta = base.density * params["delta_ratio"]
+        b_density = base.density + delta
+        c_density = b_density + delta
+        b_obj = base.copy()
+        b_obj.density = b_density
+        c_obj = base.copy()
+        c_obj.density = c_density
+        scenes = [scene_from_objects([o]) for o in [base, b_obj, c_obj]]
+        v = [base.density, b_obj.density, c_obj.density]
+        meta = build_rule_meta(
+            self, "R1", 1, involved, ["d"], ["den(O0)"], "arithmetic", {"delta": delta}, v, scenes
+        )
+        return scenes[0], scenes[1], scenes[2], meta
+
+
+@dataclass
+class S10DensityGeometric(Rule):
+    def __init__(self) -> None:
+        super().__init__("S10", RuleDifficulty.SIMPLE, "密度等比", "density 按等比变化")
+
+    def sample_params(self, rng) -> Dict:
+        k = float(rng.uniform(1.2, 1.6) if rng.random() < 0.5 else rng.uniform(0.6, 0.85))
+        return {"k": k}
+
+    def generate_triplet(self, params, rng):
+        k = params["k"]
+        objs = init_objects(rng, 1)
+        involved = [0]
+        base = objs[0]
+        b_obj = apply_density(base, k)
+        c_obj = apply_density(b_obj, k)
+        scenes = [scene_from_objects([o]) for o in [base, b_obj, c_obj]]
+        v = [base.density, b_obj.density, c_obj.density]
+        meta = build_rule_meta(
+            self, "R1", 1, involved, ["d"], ["den(O0)"], "geometric", {"k": k}, v, scenes
+        )
+        return scenes[0], scenes[1], scenes[2], meta
+
+
+@dataclass
+class S11ShapeABA(Rule):
+    def __init__(self) -> None:
+        super().__init__("S11", RuleDifficulty.SIMPLE, "形状离散替换 ABA", "形状在两种类型间往返")
+
+    def sample_params(self, rng) -> Dict:
+        shape_a, shape_b = rng.choice(SHAPES, size=2, replace=False).tolist()
+        return {"shape_a": shape_a, "shape_b": shape_b}
+
+    def generate_triplet(self, params, rng):
+        shape_a, shape_b = params["shape_a"], params["shape_b"]
+        objs = init_objects(rng, 1)
+        involved = [0]
+        objs[0].shape = shape_a
+        a_objs = clone_objects(objs)
+        b_objs = clone_objects(objs)
+        b_objs[0] = switch_shape(b_objs[0], shape_b)
+        c_objs = clone_objects(objs)
+        scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
+        v = [[shape_a], [shape_b], [shape_a]]
+        meta = build_rule_meta(
+            self, "R1", 1, involved, ["s"], ["s(O0)"], "discrete", {"shapes": [shape_a, shape_b, shape_a]}, v, scenes
+        )
+        return scenes[0], scenes[1], scenes[2], meta
+
+
+@dataclass
+class S12ShapeABC(Rule):
+    def __init__(self) -> None:
+        super().__init__("S12", RuleDifficulty.SIMPLE, "形状离散替换 ABC", "三步三种不同形状")
+
+    def sample_params(self, rng) -> Dict:
+        shapes = rng.choice(SHAPES, size=3, replace=False).tolist()
+        return {"shapes": shapes}
+
+    def generate_triplet(self, params, rng):
+        shapes = params["shapes"]
+        objs = init_objects(rng, 1)
+        involved = [0]
+        objs[0].shape = shapes[0]
+        a_objs = clone_objects(objs)
+        b_objs = clone_objects(objs)
+        b_objs[0] = switch_shape(b_objs[0], shapes[1])
+        c_objs = clone_objects(objs)
+        c_objs[0] = switch_shape(c_objs[0], shapes[2])
+        scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
+        v = [[shapes[0]], [shapes[1]], [shapes[2]]]
+        meta = build_rule_meta(
+            self, "R1", 1, involved, ["s"], ["s(O0)"], "discrete", {"shapes": shapes}, v, scenes
+        )
+        return scenes[0], scenes[1], scenes[2], meta
+
+
+@dataclass
+class S13ScaleCentroidCoupled(Rule):
+    def __init__(self) -> None:
+        super().__init__("S13", RuleDifficulty.SIMPLE, "尺度-位置联动", "缩放并平移以保持参与集合质心不变")
+
+    def sample_params(self, rng) -> Dict:
+        k = float(rng.uniform(1.2, 1.6))
+        return {"k": k}
+
+    def generate_triplet(self, params, rng):
+        k = params["k"]
+        m = int(rng.integers(2, 4))
+        objs = init_objects(rng, k=m, m=m)
+        involved = list(range(len(objs)))
+        base_cent = centroid(objs)
+
+        def scale_keep_cent(objs_in: List) -> List:
+            scaled = []
+            for o in objs_in:
+                new_o = apply_scale(o, k)
+                new_o.p = base_cent + (o.p - base_cent) / k
+                scaled.append(new_o)
+            return scaled
+
+        a_objs = clone_objects(objs)
+        b_objs = scale_keep_cent(objs)
+        c_objs = scale_keep_cent(b_objs)
+        scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
+        v = [centroid(s.objects) for s in scenes]
+        meta = build_rule_meta(
+            self,
+            "R1",
+            len(involved),
+            involved,
+            ["r", "p"],
+            ["cent(S)"],
+            "coupled",
+            {"k": k},
+            v,
+            scenes,
+        )
+        return scenes[0], scenes[1], scenes[2], meta
+
+
+@dataclass
+class S14Identity(Rule):
+    def __init__(self) -> None:
+        super().__init__("S14", RuleDifficulty.SIMPLE, "恒等规则", "A/B/C 完全相同")
+
+    def sample_params(self, rng) -> Dict:
+        return {}
+
+    def generate_triplet(self, params, rng):
+        objs = init_objects(rng, 2)
+        involved = []
+        scene = scene_from_objects(objs)
+        scenes = [scene, scene_from_objects(clone_objects(objs)), scene_from_objects(clone_objects(objs))]
+        v = [["same"], ["same"], ["same"]]
+        meta = build_rule_meta(
+            self, "R1", 0, involved, ["s", "r", "p", "R", "d"], ["identity"], "constant", {}, v, scenes
+        )
+        return scenes[0], scenes[1], scenes[2], meta
+
+
+def build_simple_rules() -> List[Rule]:
     return [
-        S01ScaleLinear(),
-        S02SingleAxisStretch(),
-        S03UniformScaling(),
-        S04FixedAxisRotation(),
-        S05FullEulerRotation(),
-        S06Translation(),
-        S07TwoStepTranslation(),
-        S08ShapeSubstitution(),
-        S09ShapeConstantScaleChange(),
-        S10PointDensityChange(),
-        S11PoseFixedSizeVertical(),
-        S12DistanceScaleMatched(),
-        S13SinglePrimitiveRotationFixedPoint(),
-        S14IdentityRule(),
+        S01ScaleGeometric(),
+        S02ScaleArithmetic(),
+        S03SingleAxisGeometric(),
+        S04AnisotropicToggle(),
+        S05FixedAxisRotation(),
+        S06RotationDiscrete(),
+        S07TranslationArithmetic(),
+        S08TranslationDiscrete(),
+        S09DensityArithmetic(),
+        S10DensityGeometric(),
+        S11ShapeABA(),
+        S12ShapeABC(),
+        S13ScaleCentroidCoupled(),
+        S14Identity(),
     ]

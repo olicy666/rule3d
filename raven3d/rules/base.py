@@ -28,3 +28,10 @@ class Rule:
         Returns A, B, C scenes and meta parameters for meta.json.
         """
         raise NotImplementedError
+
+    def make_distractors(self, scene_c: Scene, rng, meta: Dict[str, Any]) -> Tuple[list[Scene], list[str]]:
+        """
+        Optional hook: return (distractors, reasons) where distractors length is 3.
+        Default implementation is empty; DatasetGenerator will fall back to a generic perturbation.
+        """
+        return [], []

@@ -13,7 +13,7 @@ from .geometry import (
     Cone,
     rotation_matrix,
 )
-from .scene import Scene
+from .scene import Scene, ObjectState
 from .rules.base import RuleDifficulty, Rule
 from .registry import RuleRegistry
 from .dataset import DatasetGenerator, GenerationConfig
@@ -25,6 +25,7 @@ __all__ = [
     "Cylinder",
     "Cone",
     "Scene",
+    "ObjectState",
     "RuleDifficulty",
     "Rule",
     "RuleRegistry",
