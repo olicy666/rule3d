@@ -4,7 +4,7 @@ import argparse
 
 from raven3d.dataset import DatasetGenerator, GenerationConfig
 from raven3d.factory import create_default_registry
-from raven3d.rules.groups import list_available_modes, rules_for_mode
+from raven3d.rules.groups import list_available_modes, rules_for_mode, validate_rule_ids
 from raven3d.rules.base import RuleDifficulty
 
 
@@ -24,6 +24,12 @@ def parse_args() -> argparse.Namespace:
         choices=list_available_modes(),
         help="Rule preset: main / r1-only / r2-only / r3-only / all-minus-r1 / all-minus-r2 / all-minus-r3",
     )
+    parser.add_argument(
+        "--rules",
+        type=str,
+        default=None,
+        help="Comma-separated rule IDs (e.g., S01,M04,C02). When provided, overrides --mode.",
+    )
     return parser.parse_args()
 
 
@@ -34,12 +40,16 @@ def main() -> None:
         RuleDifficulty.MEDIUM: args.medium_prob,
         RuleDifficulty.COMPLEX: args.complex_prob,
     }
-    rule_filter = rules_for_mode(args.mode)
+    try:
+        rule_filter = validate_rule_ids(args.rules.split(",")) if args.rules else rules_for_mode(args.mode)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
     config = GenerationConfig(n_points=args.points, difficulty_probs=probs, rule_filter=rule_filter)
     registry = create_default_registry()
     generator = DatasetGenerator(registry, config=config, seed=args.seed)
     generator.generate_dataset(args.output, args.num_samples)
-    print(f"Generated {args.num_samples} samples in {args.output} with mode '{args.mode}'")
+    mode_info = f"custom rules [{', '.join(sorted(rule_filter))}]" if args.rules else f"mode '{args.mode}'"
+    print(f"Generated {args.num_samples} samples in {args.output} with {mode_info}")
 
 
 if __name__ == "__main__":

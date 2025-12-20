@@ -1,4 +1,4 @@
-# Rule3D：基于规则的多几何体点云推理数据集生成器（数学原型版）
+# Rule3D：基于规则的多几何体点云推理数据集生成器
 
 本项目实现 `program.md` 中的“数学原型”版生成器：每题输出 6 个点云（1/2 为参考帧 A/B，3/4/5/6 为四个候选，其中仅 1 个正确）和 `meta.json`，同时根目录提供所有题目的 `meta.json` 列表。规则总数 36（移除 R4 拓扑类），每帧场景由 2~3 个几何体组成。
 
@@ -7,6 +7,18 @@
 ```bash
 pip install numpy
 python main.py --output output --num-samples 3 --points 4096 --seed 0
+## 模式与参数
+- `--mode` 可选：
+  - 主集合：`main`
+  - 大类：`r1-only`, `r2-only`, `r3-only`
+  - 消融：`all-minus-r1`, `all-minus-r2`, `all-minus-r3`
+  - （已删除 `r4-only` 与 `all-minus-r4`）
+- `--rules` 自定义规则列表（逗号分隔，如 `S01,M04,C02`，会覆盖 `--mode`）
+  - 仅从给定规则编号中采样题目，编号不区分大小写，非法编号会直接报错提示可选列表。
+  - 示例：`python main.py --num-samples 5 --rules S01,M04,C02 --points 4096`
+- 难度权重：`--simple-prob / --medium-prob / --complex-prob`，默认 0.7 / 0.2 / 0.1。
+- 其他：`--output`, `--num-samples`, `--points`, `--seed`。
+示例：`python main.py --num-samples 10 --mode r2-only --points 4096`
 ```
 生成目录示例：
 ```
@@ -20,6 +32,7 @@ output/sample_000000/
     meta.json  # 含文件路径、正确选项、rule_meta
 output/meta.json  # 所有题目的 meta 列表
 ```
+点云文件固定颜色（每个文件内所有点相同）：1=红，2=绿，3=蓝，4=紫，5=白，6=橙。
 
 ## 数学对象定义
 - 场景帧：$$X_t = \{O_{t,1}, \dots, O_{t,M_t}\},\quad M_t \in \{2,3\}$$
@@ -85,18 +98,7 @@ output/meta.json  # 所有题目的 meta 列表
 - **C09 组间质心距离等差**：$$u_t=\|\text{cent}(S_a)-\text{cent}(S_b)\|,\ u_3=2u_2-u_1$$
 - **C12 面积-边长守恒**：$$\text{area}(1,2,3)\cdot \text{dist}(1,2)=C$$
 
-## 模式与参数
-- `--mode` 可选：
-  - 主集合：`main`
-  - 大类：`r1-only`, `r2-only`, `r3-only`
-  - 消融：`all-minus-r1`, `all-minus-r2`, `all-minus-r3`
-  - （已删除 `r4-only` 与 `all-minus-r4`）
-- 难度权重：`--simple-prob / --medium-prob / --complex-prob`，默认 0.7 / 0.2 / 0.1。
-- 其他：`--output`, `--num-samples`, `--points`, `--seed`。
-示例：`python main.py --num-samples 10 --mode r2-only --points 4096`
 
-## 被删除的规则与类目
-R4 结构与拓扑推理整类移除，`C04/C05/C06/C07` 不再生成，规则总数变为 36；所有 R4 相关模式从代码与文档中删除。
 
 ## 目录结构
 - `main.py`：CLI 入口与模式选择

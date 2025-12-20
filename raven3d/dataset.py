@@ -118,6 +118,14 @@ class DatasetGenerator:
         # Option labels correspond to output filenames 3.ply ~ 6.ply
         option_labels = ["A", "B", "C", "D"]
         candidate_files = ["3.ply", "4.ply", "5.ply", "6.ply"]
+        color_map = {
+            "1.ply": (255, 0, 0),  # red
+            "2.ply": (0, 255, 0),  # green
+            "3.ply": (0, 0, 255),  # blue
+            "4.ply": (128, 0, 128),  # purple
+            "5.ply": (255, 255, 255),  # white
+            "6.ply": (255, 165, 0),  # orange
+        }
         if correct_idx is None:
             correct_idx = int(self.rng.integers(0, len(option_labels)))
         candidate_points = [None] * len(option_labels)
@@ -146,11 +154,11 @@ class DatasetGenerator:
 
         sample_dir = output_root / f"sample_{sample_index:06d}"
         ensure_dir(sample_dir)
-        write_ply(sample_dir / "1.ply", pts_a)
-        write_ply(sample_dir / "2.ply", pts_b)
+        write_ply(sample_dir / "1.ply", pts_a, color=color_map["1.ply"])
+        write_ply(sample_dir / "2.ply", pts_b, color=color_map["2.ply"])
 
         for fname, pts in zip(candidate_files, candidate_points):
-            write_ply(sample_dir / fname, pts)
+            write_ply(sample_dir / fname, pts, color=color_map.get(fname))
 
         def rel(path: Path) -> str:
             try:
