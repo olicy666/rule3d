@@ -4,6 +4,7 @@ import csv
 import hashlib
 import json
 import tempfile
+from datetime import datetime
 from collections import Counter
 from pathlib import Path
 from typing import Dict, List
@@ -17,6 +18,7 @@ from raven3d.factory import create_default_registry
 from raven3d.rules.groups import list_all_rules
 
 RECORDS_PATH = Path("exam_records.csv")
+RESULTS_DIR = Path("results")
 TOTAL_QUESTIONS = 20
 PLY_HEIGHT = 320
 POINTS_PER_CLOUD = 16384
@@ -38,7 +40,7 @@ def sort_rule_ids(rule_ids: List[str]) -> List[str]:
 
 
 RULE_IDS = sort_rule_ids(list_all_rules())
-RECORD_COLUMNS = ["username", "mode", "score", "total", "accuracy", "reason"]
+RECORD_COLUMNS = ["username", "mode", "score", "total", "accuracy", "reason", "result_path"]
 
 
 def pl_component(ply_content_str: str, height: int = PLY_HEIGHT, reset_nonce: int = 0) -> None:
@@ -278,8 +280,6 @@ def build_result(
                 "gt_option": gt_option,
                 "user_option": user_option,
                 "is_correct": is_correct,
-                "correct_reason": cand_reasons.get(gt_option, ""),
-                "user_reason": wrong_reason if user_option else "",
             }
         )
     total = len(meta)
@@ -307,6 +307,11 @@ def append_record(record: Dict) -> None:
         if not file_exists:
             writer.writeheader()
         writer.writerow(record)
+
+
+def safe_slug(text: str) -> str:
+    cleaned = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in text.strip())
+    return cleaned.strip("_") or "user"
 
 
 def load_records() -> pd.DataFrame:
@@ -361,6 +366,33 @@ def render_admin() -> None:
     st.subheader("各用户正确率")
     user_acc = df.groupby("username")["accuracy"].mean().sort_values(ascending=False)
     st.bar_chart(user_acc)
+
+    st.subheader("下载答题结果")
+    df = df.reset_index(drop=True)
+    downloadable = df[df["result_path"].notna() & df["result_path"].astype(str).str.len() > 0]
+    if downloadable.empty:
+        st.info("暂无可下载的 result.json。")
+    else:
+        label_to_path = {}
+        options = []
+        for idx, row in downloadable.iterrows():
+            label = (
+                f"{idx + 1}: {row.get('username', '')} | {row.get('mode', '')} | "
+                f"{row.get('score', '')}/{row.get('total', '')}"
+            )
+            options.append(label)
+            label_to_path[label] = Path(str(row.get("result_path", "")))
+        selected_label = st.selectbox("选择记录", options)
+        selected_path = label_to_path.get(selected_label)
+        if selected_path and selected_path.exists():
+            st.download_button(
+                "下载 result.json",
+                data=selected_path.read_bytes(),
+                file_name=selected_path.name,
+                mime="application/json",
+            )
+        else:
+            st.warning("该记录的 result.json 文件不存在。")
 
     st.subheader("规则平均正确率")
     mode_acc = df.groupby("mode")["accuracy"].mean()
@@ -500,6 +532,11 @@ def render_exam() -> None:
         st.session_state.score = result["score"]
         result_path = Path(st.session_state.exam_dir) / "result.json"
         result_path.write_text(st.session_state.result_json, encoding="utf-8")
+        RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{safe_slug(st.session_state.username)}_{st.session_state.mode}_{timestamp}.json"
+        persistent_path = RESULTS_DIR / filename
+        persistent_path.write_text(st.session_state.result_json, encoding="utf-8")
         if not st.session_state.result_saved:
             record = {
                 "username": st.session_state.username,
@@ -508,6 +545,7 @@ def render_exam() -> None:
                 "total": result["total"],
                 "accuracy": result["accuracy"],
                 "reason": json.dumps(result["error_reason_ratio"], ensure_ascii=False),
+                "result_path": str(persistent_path),
             }
             append_record(record)
             st.session_state.result_saved = True
