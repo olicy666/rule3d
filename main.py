@@ -14,9 +14,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-samples", type=int, default=3, help="Number of samples to generate")
     parser.add_argument("--points", type=int, default=4096, help="Number of points per point cloud")
     parser.add_argument("--seed", type=int, default=None, help="Optional random seed")
-    parser.add_argument("--simple-prob", type=float, default=0.7, help="Probability for simple rules")
-    parser.add_argument("--medium-prob", type=float, default=0.2, help="Probability for medium rules")
-    parser.add_argument("--complex-prob", type=float, default=0.1, help="Probability for complex rules")
+    parser.add_argument("--simple-prob", type=float, default=0.7, help="Deprecated (rule sampling is uniform)")
+    parser.add_argument("--medium-prob", type=float, default=0.2, help="Deprecated (rule sampling is uniform)")
+    parser.add_argument("--complex-prob", type=float, default=0.1, help="Deprecated (rule sampling is uniform)")
     parser.add_argument(
         "--mode",
         type=str.lower,

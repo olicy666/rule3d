@@ -268,23 +268,32 @@ class S09DensityArithmetic(Rule):
         super().__init__("S09", RuleDifficulty.SIMPLE, "密度等差", "density 按等差变化")
 
     def sample_params(self, rng) -> Dict:
-        delta_ratio = float(rng.uniform(0.1, 0.3))
+        delta_ratio = float(rng.uniform(0.35, 0.6))
         sign = -1.0 if rng.random() < 0.5 else 1.0
         return {"delta_ratio": delta_ratio * sign}
 
     def generate_triplet(self, params, rng):
-        objs = init_objects(rng, 1)
+        objs = init_objects(rng, 2)
         involved = [0]
-        base = objs[0]
-        delta = base.density * params["delta_ratio"]
+        a_objs = clone_objects(objs)
+        b_objs = clone_objects(objs)
+        c_objs = clone_objects(objs)
+        base = a_objs[0]
+        delta_ratio = float(params["delta_ratio"])
+        if delta_ratio < 0:
+            min_density = 0.2
+            max_neg_ratio = (base.density - min_density) / (2 * base.density)
+            if max_neg_ratio < 0.35:
+                delta_ratio = abs(delta_ratio)
+            else:
+                delta_ratio = -min(abs(delta_ratio), max_neg_ratio)
+        delta = base.density * delta_ratio
         b_density = base.density + delta
         c_density = b_density + delta
-        b_obj = base.copy()
-        b_obj.density = b_density
-        c_obj = base.copy()
-        c_obj.density = c_density
-        scenes = [scene_from_objects([o]) for o in [base, b_obj, c_obj]]
-        v = [base.density, b_obj.density, c_obj.density]
+        b_objs[0].density = b_density
+        c_objs[0].density = c_density
+        scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
+        v = [base.density, b_objs[0].density, c_objs[0].density]
         meta = build_rule_meta(
             self, "R1", 1, involved, ["d"], ["den(O0)"], "arithmetic", {"delta": delta}, v, scenes
         )
@@ -297,18 +306,21 @@ class S10DensityGeometric(Rule):
         super().__init__("S10", RuleDifficulty.SIMPLE, "密度等比", "density 按等比变化")
 
     def sample_params(self, rng) -> Dict:
-        k = float(rng.uniform(1.2, 1.6) if rng.random() < 0.5 else rng.uniform(0.6, 0.85))
+        k = float(rng.uniform(1.7, 2.2) if rng.random() < 0.5 else rng.uniform(0.5, 0.7))
         return {"k": k}
 
     def generate_triplet(self, params, rng):
         k = params["k"]
-        objs = init_objects(rng, 1)
+        objs = init_objects(rng, 2)
         involved = [0]
-        base = objs[0]
-        b_obj = apply_density(base, k)
-        c_obj = apply_density(b_obj, k)
-        scenes = [scene_from_objects([o]) for o in [base, b_obj, c_obj]]
-        v = [base.density, b_obj.density, c_obj.density]
+        a_objs = clone_objects(objs)
+        b_objs = clone_objects(objs)
+        c_objs = clone_objects(objs)
+        base = a_objs[0]
+        b_objs[0] = apply_density(base, k)
+        c_objs[0] = apply_density(b_objs[0], k)
+        scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
+        v = [base.density, b_objs[0].density, c_objs[0].density]
         meta = build_rule_meta(
             self, "R1", 1, involved, ["d"], ["den(O0)"], "geometric", {"k": k}, v, scenes
         )

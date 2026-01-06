@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>6-Cloud Point Viewer</title>
+  <style>
+    html, body { height: 100%; margin: 0; overflow: hidden; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
+    #app { display: flex; height: 100%; }
+    #sidebar {
+      width: 260px;
+      background: #f7f7f7;
+      border-right: 1px solid #ddd;
+      padding: 12px 12px;
+      box-sizing: border-box;
+    }
+    #sidebar h2 { font-size: 14px; margin: 0 0 10px; }
+    #sidebar .row { display: flex; align-items: center; justify-content: space-between; margin: 8px 0; gap: 10px; }
+    #sidebar label { font-size: 13px; user-select: none; }
+    #sidebar input[type="range"] { width: 140px; }
+    #hint {
+      font-size: 12px;
+      color: #555;
+      margin-top: 12px;
+      line-height: 1.45;
+    }
+    #canvasWrap { position: relative; flex: 1; }
+    #overlay {
+      position: absolute; left: 10px; top: 10px;
+      background: rgba(255,255,255,0.75);
+      border: 1px solid rgba(0,0,0,0.08);
+      padding: 8px 10px;
+      border-radius: 10px;
+      font-size: 12px;
+      color: #333;
+      pointer-events: none;
+      backdrop-filter: blur(4px);
+    }
+  </style>
+</head>
+
+<body>
+<div id="app">
+  <div id="sidebar">
+    <h2>点云列表（勾选显示）</h2>
+
+    <div id="cloudToggles"></div>
+
+    <hr style="border:none;border-top:1px solid #e0e0e0;margin:10px 0;">
+
+    <div class="row">
+      <label>点大小</label>
+      <input id="ptSize" type="range" min="0.5" max="8.0" step="0.1" value="2.2">
+    </div>
+
+    <div class="row">
+      <label>缩放限制</label>
+      <input id="zoomLock" type="checkbox" />
+    </div>
+
+    <div class="row">
+      <button id="fitBtn" style="width:100%;padding:8px 10px;border:1px solid #ccc;border-radius:10px;background:#fff;cursor:pointer;">
+        重新自适应视角（Fit）
+      </button>
+    </div>
+
+    <div id="hint">
+      鼠标：<br>
+      - 左键拖动：旋转<br>
+      - 右键拖动：平移<br>
+      - 滚轮：缩放（会被限制在“清楚但不稀”的距离区间）<br><br>
+      说明：如果你希望“完全固定远近”，勾选“缩放限制”即可（禁用滚轮缩放）。
+    </div>
+  </div>
+
+  <div id="canvasWrap">
+    <div id="overlay">加载中…</div>
+  </div>
+</div>
+
+<script type="module">
+  import * as THREE from "https://unpkg.com/three@0.161.0/build/three.module.js";
+  import { OrbitControls } from "https://unpkg.com/three@0.161.0/examples/jsm/controls/OrbitControls.js";
+  import { PLYLoader } from "https://unpkg.com/three@0.161.0/examples/jsm/loaders/PLYLoader.js";
+
+  // ====== 你只需要改这里的文件路径（相对 index.html）======
+  const CLOUD_FILES = [
+    "sample_000000/1.ply",
+    "sample_000000/2.ply",
+    "sample_000000/3.ply",
+    "sample_000000/4.ply",
+    "sample_000000/5.ply",
+    "sample_000000/6.ply",
+  ];
+  // ========================================================
+
+  const overlay = document.getElementById("overlay");
+  const canvasWrap = document.getElementById("canvasWrap");
+  const cloudToggles = document.getElementById("cloudToggles");
+  const ptSizeEl = document.getElementById("ptSize");
+  const zoomLockEl = document.getElementById("zoomLock");
+  const fitBtn = document.getElementById("fitBtn");
+
+  // Scene / Camera / Renderer
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0xffffff); // 白底
+
+  const camera = new THREE.PerspectiveCamera(45, 1, 0.001, 1e9);
+  camera.position.set(0, 0, 5);
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  canvasWrap.appendChild(renderer.domElement);
+
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.06;
+  controls.screenSpacePanning = true;
+
+  // 给个温和的光（点云本身通常不需要光，但有些 PLY 带法线/材质时会更舒服）
+  scene.add(new THREE.AmbientLight(0xffffff, 1.0));
+
+  const loader = new PLYLoader();
+
+  // 6个点云对象
+  const clouds = [];
+  const cloudMaterials = [];
+
+  // 用于自动计算最佳视距的整体包围盒
+  const globalBox = new THREE.Box3();
+  let globalBoxInitialized = false;
+
+  function setOverlay(text) { overlay.textContent = text; }
+
+  function createPointMaterial() {
+    // 这里的 size 是“世界单位”，会随相机距离衰减（sizeAttenuation=true）
+    // 我们会在 fit 时根据点云尺度自动调一个“好看”的 size
+    return new THREE.PointsMaterial({
+      color: 0x1f77b4,        // 接近你截图里的蓝
+      size: 1.0,
+      sizeAttenuation: true,
+      transparent: true,
+      opacity: 1.0
+    });
+  }
+
+  function buildUI() {
+    cloudToggles.innerHTML = "";
+    clouds.forEach((obj, i) => {
+      const row = document.createElement("div");
+      row.className = "row";
+      const label = document.createElement("label");
+      label.textContent = `${i + 1} - Cloud`;
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.checked = true;
+      cb.addEventListener("change", () => {
+        obj.visible = cb.checked;
+      });
+      row.appendChild(label);
+      row.appendChild(cb);
+      cloudToggles.appendChild(row);
+    });
+  }
+
+  function fitCameraToGlobalBox() {
+    if (!globalBoxInitialized) return;
+
+    // 以整体包围盒确定一个“最合适观看距离”
+    const center = new THREE.Vector3();
+    const size = new THREE.Vector3();
+    globalBox.getCenter(center);
+    globalBox.getSize(size);
+
+    const radius = size.length() * 0.5; // 用对角线近似整体半径
+    controls.target.copy(center);
+
+    // 让球体刚好塞进视锥：d = R / tan(fov/2)
+    const fov = THREE.MathUtils.degToRad(camera.fov);
+    let dist = radius / Math.tan(fov / 2);
+
+    // 经验系数：稍微拉远一点，让画面像你图二那样“清楚且舒服”
+    dist *= 1.15;
+
+    // 设定相机位置：沿当前视线方向放到目标点外 dist
+    const dir = new THREE.Vector3().subVectors(camera.position, controls.target).normalize();
+    if (dir.lengthSq() < 1e-12) dir.set(0, 0, 1);
+    camera.position.copy(center).addScaledVector(dir, dist);
+    camera.near = Math.max(dist / 10000, 0.0001);
+    camera.far = Math.max(dist * 1000, camera.near + 1);
+    camera.updateProjectionMatrix();
+
+    // 缩放限制：核心！避免“拉太近变稀疏”
+    // 给一个比较窄的区间：允许你小幅 zoom，但不允许贴脸
+    controls.minDistance = dist * 0.85;
+    controls.maxDistance = dist * 1.35;
+
+    // 根据尺度自动设置点大小（默认值）
+    // 直觉：点的“世界尺寸”与整体半径成正比，太小看不清，太大糊成一片
+    const autoSize = Math.max(radius * 0.0022, 0.0005);
+    const uiSize = parseFloat(ptSizeEl.value);
+    const finalSize = autoSize * (uiSize / 2.2); // 用滑条做相对倍率
+    cloudMaterials.forEach(m => m.size = finalSize);
+
+    setOverlay(`已自适应视角：radius≈${radius.toFixed(4)}  dist≈${dist.toFixed(4)}  pointSize≈${finalSize.toExponential(2)}`);
+  }
+
+  async function loadAll() {
+    setOverlay("加载点云中…");
+    const promises = CLOUD_FILES.map((url, idx) => new Promise((resolve, reject) => {
+      loader.load(url, (geometry) => {
+        geometry.computeVertexNormals?.();
+
+        // PLYLoader 读出来是 BufferGeometry（positions 必须有）
+        const material = createPointMaterial();
+        const points = new THREE.Points(geometry, material);
+        points.name = `Cloud-${idx+1}`;
+
+        scene.add(points);
+        clouds.push(points);
+        cloudMaterials.push(material);
+
+        // 扩展全局包围盒
+        geometry.computeBoundingBox();
+        const box = geometry.boundingBox;
+        if (box) {
+          if (!globalBoxInitialized) {
+            globalBox.copy(box);
+            globalBoxInitialized = true;
+          } else {
+            globalBox.union(box);
+          }
+        }
+
+        resolve();
+      }, undefined, (err) => reject(err));
+    }));
+
+    try {
+      await Promise.all(promises);
+      buildUI();
+      fitCameraToGlobalBox();
+      setOverlay("加载完成 ✅（可旋转/平移/缩放，缩放被限制在合适范围）");
+    } catch (e) {
+      console.error(e);
+      setOverlay("加载失败：请检查 PLY 路径、并用本地 HTTP 服务打开（不能直接双击 html）。");
+    }
+  }
+
+  function resize() {
+    const w = canvasWrap.clientWidth;
+    const h = canvasWrap.clientHeight;
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+    renderer.setSize(w, h, false);
+  }
+
+  window.addEventListener("resize", resize);
+
+  ptSizeEl.addEventListener("input", () => {
+    // 重新 fit 一次，让点大小仍然与尺度匹配（滑条只是倍率）
+    fitCameraToGlobalBox();
+  });
+
+  zoomLockEl.addEventListener("change", () => {
+    const lock = zoomLockEl.checked;
+    controls.enableZoom = !lock;
+    // 你也可以选择 lock 时把 min=max=当前距离，但禁用 zoom 更干净
+    setOverlay(lock ? "已锁定远近（禁用缩放）" : "允许缩放（仍有距离限制）");
+  });
+
+  fitBtn.addEventListener("click", () => fitCameraToGlobalBox());
+
+  function animate() {
+    requestAnimationFrame(animate);
+    controls.update();
+    renderer.render(scene, camera);
+  }
+
+  resize();
+  loadAll();
+  animate();
+</script>
+</body>
+</html>

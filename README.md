@@ -16,9 +16,10 @@ python main.py --output output --num-samples 3 --points 4096 --seed 0
 - `--rules` 自定义规则列表（逗号分隔，如 `S01,M04,C02`，会覆盖 `--mode`）
   - 仅从给定规则编号中采样题目，编号不区分大小写，非法编号会直接报错提示可选列表。
   - 示例：`python main.py --num-samples 5 --rules S01,M04,C02 --points 4096`
-- 难度权重：`--simple-prob / --medium-prob / --complex-prob`，默认 0.7 / 0.2 / 0.1。
+- 规则采样：当前对可用规则等概率随机采样（`--simple-prob / --medium-prob / --complex-prob` 已弃用）。
 - 其他：`--output`, `--num-samples`, `--points`, `--seed`。
 示例：`python main.py --num-samples 10 --mode r2-only --points 4096`
+- 默认每帧点数 `--points=4096`，写入 PLY 时固定颜色：1=红，2=绿，3=蓝，4=紫，5=白，6=橙（同一文件内所有点同色）。
 ```
 生成目录示例：
 ```
@@ -32,7 +33,7 @@ output/sample_000000/
     meta.json  # 含文件路径、正确选项、rule_meta
 output/meta.json  # 所有题目的 meta 列表
 ```
-点云文件固定颜色（每个文件内所有点相同）：1=红，2=绿，3=蓝，4=紫，5=白，6=橙。
+点云文件固定颜色（每个文件内所有点相同）：1=深海蓝(31,119,180)，2=鲜亮橙(255,127,14)，3=森林绿(44,160,44)，4=砖红(214,39,40)，5=柔和紫(148,103,189)，6=可可棕(140,86,75)。
 
 ## 数学对象定义
 - 场景帧：$$X_t = \{O_{t,1}, \dots, O_{t,M_t}\},\quad M_t \in \{2,3\}$$

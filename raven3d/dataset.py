@@ -35,6 +35,7 @@ class DatasetGenerator:
         if seed is not None:
             np.random.seed(seed)
         self._rule_pools = self._build_rule_pools()
+        self._all_rules = [rule for rules in self._rule_pools.values() for rule in rules]
 
     def _build_rule_pools(self) -> Dict[RuleDifficulty, List]:
         pools: Dict[RuleDifficulty, List] = {}
@@ -55,10 +56,8 @@ class DatasetGenerator:
         return difficulties[int(idx)]
 
     def _sample_rule(self):
-        difficulty = self._sample_difficulty()
-        rules = self._rule_pools[difficulty]
-        idx = self.rng.integers(0, len(rules))
-        return rules[int(idx)]
+        idx = self.rng.integers(0, len(self._all_rules))
+        return self._all_rules[int(idx)]
 
     def _perturb_scene(self, scene: Scene, meta: Dict) -> Tuple[Scene, str]:
         """Create a distractor by altering one participating object while keeping others intact."""
@@ -119,12 +118,12 @@ class DatasetGenerator:
         option_labels = ["A", "B", "C", "D"]
         candidate_files = ["3.ply", "4.ply", "5.ply", "6.ply"]
         color_map = {
-            "1.ply": (255, 0, 0),  # red
-            "2.ply": (0, 255, 0),  # green
-            "3.ply": (0, 0, 255),  # blue
-            "4.ply": (128, 0, 128),  # purple
-            "5.ply": (255, 255, 255),  # white
-            "6.ply": (255, 165, 0),  # orange
+            "1.ply": (31, 119, 180),  # deep blue
+            "2.ply": (255, 127, 14),  # vivid orange
+            "3.ply": (44, 160, 44),  # forest green
+            "4.ply": (214, 39, 40),  # brick red
+            "5.ply": (148, 103, 189),  # muted purple
+            "6.ply": (140, 86, 75),  # cocoa brown
         }
         if correct_idx is None:
             correct_idx = int(self.rng.integers(0, len(option_labels)))
