@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import numpy as np
 
@@ -23,6 +23,7 @@ from .utils import (
     size,
     switch_shape,
 )
+from ..scene import Scene
 
 
 @dataclass
@@ -57,7 +58,7 @@ class S02ScaleArithmetic(Rule):
         super().__init__("S02", RuleDifficulty.SIMPLE, "等差统一缩放", "size 按等差递进")
 
     def sample_params(self, rng) -> Dict:
-        delta_ratio = float(rng.uniform(0.15, 0.35))
+        delta_ratio = float(rng.uniform(0.3, 0.55))
         sign = -1.0 if rng.random() < 0.5 else 1.0
         return {"delta_ratio": delta_ratio * sign}
 
@@ -83,6 +84,37 @@ class S02ScaleArithmetic(Rule):
             self, "R1", 1, involved, ["r"], ["size(O0)"], "arithmetic", {"delta": delta}, v, scenes
         )
         return scenes[0], scenes[1], scenes[2], meta
+
+    def make_distractors(self, scene_c: Scene, rng, meta: Dict) -> Tuple[list[Scene], list[str]]:
+        if not scene_c.objects:
+            return [], []
+        v = meta.get("v", {})
+        v2 = v.get("v2", [None])[0]
+        v3 = v.get("v3", [scene_c.objects[0].density])[0]
+        delta = meta.get("pattern_params", {}).get("delta")
+        if delta is None and v2 is not None:
+            delta = float(v3) - float(v2)
+        if delta is None:
+            delta = 0.0
+        base_size = float(v2) if v2 is not None else float(v3) - float(delta)
+
+        wrong_deltas = [delta * 2.0, delta * 0.4, -delta * 1.4]
+
+        def with_size(target_size: float) -> Scene:
+            objs = clone_objects(scene_c.objects)
+            cur_size = size(objs[0])
+            if cur_size > 1e-6:
+                scale = (target_size / cur_size) ** (1 / 3)
+                objs[0] = apply_scale(objs[0], scale)
+            return scene_from_objects(objs)
+
+        distractors = [with_size(base_size + d) for d in wrong_deltas]
+        reasons = [
+            "等差步长显著偏大",
+            "等差步长显著偏小",
+            "等差方向错误",
+        ]
+        return distractors, reasons
 
 
 @dataclass
@@ -112,30 +144,90 @@ class S03SingleAxisGeometric(Rule):
 
 
 @dataclass
-class S04AnisotropicToggle(Rule):
+class S04AnisotropicGeometric(Rule):
     def __init__(self) -> None:
-        super().__init__("S04", RuleDifficulty.SIMPLE, "各向异性比例切换", "aspect ratio 在两种状态 ABA 切换")
+        super().__init__("S04", RuleDifficulty.SIMPLE, "各向异性等比拉伸", "体积不变的等比拉伸")
 
     def sample_params(self, rng) -> Dict:
-        factor = float(rng.uniform(1.3, 1.8))
-        return {"factor": factor}
+        factor = float(rng.uniform(1.25, 1.7))
+        axis_idx = int(rng.integers(0, 3))
+        return {"factor": factor, "axis": axis_idx}
 
     def generate_triplet(self, params, rng):
         objs = init_objects(rng, 1)
         involved = [0]
-        factor = params["factor"]
+        factor = float(params["factor"])
+        axis_idx = int(params["axis"])
         base = objs[0]
-        alt = apply_scale(base, factor, axis_mask=[True, False, False])
+        squeeze = 1.0 / math.sqrt(factor)
+        scale = np.ones(3)
+        scale[axis_idx] = factor
+        for i in range(3):
+            if i != axis_idx:
+                scale[i] = squeeze
+        alt = apply_scale(base, scale)
 
         a_objs = [base.copy()]
         b_objs = [alt]
-        c_objs = [base.copy()]
+        c_objs = [apply_scale(alt, scale)]
         scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
         v = [aspect_ratio(o) for o in [a_objs[0], b_objs[0], c_objs[0]]]
         meta = build_rule_meta(
-            self, "R1", 1, involved, ["r"], ["ar(O0)"], "discrete", {"states": ["c1", "c2", "c1"]}, v, scenes
+            self,
+            "R1",
+            1,
+            involved,
+            ["r"],
+            ["ar(O0)"],
+            "geometric",
+            {"factor": factor, "axis": axis_idx, "volume_const": True},
+            v,
+            scenes,
         )
         return scenes[0], scenes[1], scenes[2], meta
+
+    def make_distractors(self, scene_c: Scene, rng, meta: Dict) -> Tuple[list[Scene], list[str]]:
+        if not scene_c.objects:
+            return [], []
+        factor = float(meta.get("pattern_params", {}).get("factor", 1.4))
+        axis_idx = int(meta.get("pattern_params", {}).get("axis", 0))
+        base = scene_c.objects[0]
+
+        def with_scale(scale: np.ndarray) -> Scene:
+            objs = clone_objects(scene_c.objects)
+            objs[0] = apply_scale(objs[0], scale)
+            return scene_from_objects(objs)
+
+        squeeze = 1.0 / math.sqrt(factor)
+        good_scale = np.ones(3)
+        good_scale[axis_idx] = factor
+        for i in range(3):
+            if i != axis_idx:
+                good_scale[i] = squeeze
+
+        bad_uniform = np.ones(3) * factor
+        bad_nonconst = np.ones(3)
+        bad_nonconst[axis_idx] = factor
+        bad_nonconst[(axis_idx + 1) % 3] = 1.0
+        bad_nonconst[(axis_idx + 2) % 3] = 1.0
+
+        flip_scale = good_scale.copy()
+        flip_scale[axis_idx] = 1.0 / factor
+        for i in range(3):
+            if i != axis_idx:
+                flip_scale[i] = math.sqrt(factor)
+
+        distractors = [
+            with_scale(bad_uniform),
+            with_scale(bad_nonconst),
+            with_scale(flip_scale),
+        ]
+        reasons = [
+            "各向同性放大，体积未保持且比例不符",
+            "仅单轴放大，体积不守恒",
+            "拉伸方向相反，比例不符",
+        ]
+        return distractors, reasons
 
 
 @dataclass
@@ -235,6 +327,35 @@ class S07TranslationArithmetic(Rule):
         )
         return scenes[0], scenes[1], scenes[2], meta
 
+    def make_distractors(self, scene_c: Scene, rng, meta: Dict) -> Tuple[list[Scene], list[str]]:
+        if not scene_c.objects:
+            return [], []
+        obj = scene_c.objects[0]
+        delta = np.array(meta.get("pattern_params", {}).get("delta", [0.0, 0.0, 0.0]), dtype=float)
+        if np.linalg.norm(delta) < 1e-6:
+            delta = rng.uniform(0.3, 0.6, size=3) * rng.choice([-1, 1], size=3)
+
+        def with_position(offset: np.ndarray) -> Scene:
+            objs = clone_objects(scene_c.objects)
+            objs[0].p = obj.p + offset
+            return scene_from_objects(objs)
+
+        ortho = np.array([delta[1], -delta[0], delta[2]])
+        if np.linalg.norm(ortho) < 1e-6:
+            ortho = rng.uniform(0.4, 0.8, size=3) * rng.choice([-1, 1], size=3)
+
+        distractors = [
+            with_position(-delta),
+            with_position(delta * 2.0),
+            with_position(ortho),
+        ]
+        reasons = [
+            "平移方向反向",
+            "平移幅度过大",
+            "平移方向改变",
+        ]
+        return distractors, reasons
+
 
 @dataclass
 class S08TranslationDiscrete(Rule):
@@ -268,7 +389,7 @@ class S09DensityArithmetic(Rule):
         super().__init__("S09", RuleDifficulty.SIMPLE, "密度等差", "density 按等差变化")
 
     def sample_params(self, rng) -> Dict:
-        delta_ratio = float(rng.uniform(0.35, 0.6))
+        delta_ratio = float(rng.uniform(0.6, 0.9))
         sign = -1.0 if rng.random() < 0.5 else 1.0
         return {"delta_ratio": delta_ratio * sign}
 
@@ -299,6 +420,34 @@ class S09DensityArithmetic(Rule):
         )
         return scenes[0], scenes[1], scenes[2], meta
 
+    def make_distractors(self, scene_c: Scene, rng, meta: Dict) -> Tuple[list[Scene], list[str]]:
+        if not scene_c.objects:
+            return [], []
+        v = meta.get("v", {})
+        v2 = v.get("v2", [None])[0]
+        v3 = v.get("v3", [scene_c.objects[0].density])[0]
+        delta = meta.get("pattern_params", {}).get("delta")
+        if delta is None and v2 is not None:
+            delta = float(v3) - float(v2)
+        if delta is None:
+            delta = 0.0
+        base_density = float(v2) if v2 is not None else float(v3) - float(delta)
+
+        wrong_factors = [2.2, 0.3, -1.6]
+
+        def with_density(value: float) -> Scene:
+            objs = clone_objects(scene_c.objects)
+            objs[0].density = max(float(value), 1e-3)
+            return scene_from_objects(objs)
+
+        distractors = [with_density(base_density + delta * f) for f in wrong_factors]
+        reasons = [
+            "密度差值显著偏大",
+            "密度差值显著偏小",
+            "密度差值方向错误",
+        ]
+        return distractors, reasons
+
 
 @dataclass
 class S10DensityGeometric(Rule):
@@ -306,7 +455,7 @@ class S10DensityGeometric(Rule):
         super().__init__("S10", RuleDifficulty.SIMPLE, "密度等比", "density 按等比变化")
 
     def sample_params(self, rng) -> Dict:
-        k = float(rng.uniform(1.7, 2.2) if rng.random() < 0.5 else rng.uniform(0.5, 0.7))
+        k = float(rng.uniform(2.2, 3.0) if rng.random() < 0.5 else rng.uniform(0.3, 0.5))
         return {"k": k}
 
     def generate_triplet(self, params, rng):
@@ -325,6 +474,45 @@ class S10DensityGeometric(Rule):
             self, "R1", 1, involved, ["d"], ["den(O0)"], "geometric", {"k": k}, v, scenes
         )
         return scenes[0], scenes[1], scenes[2], meta
+
+    def make_distractors(self, scene_c: Scene, rng, meta: Dict) -> Tuple[list[Scene], list[str]]:
+        if not scene_c.objects:
+            return [], []
+        v = meta.get("v", {})
+        v2 = v.get("v2", [None])[0]
+        v3 = v.get("v3", [scene_c.objects[0].density])[0]
+        k = meta.get("pattern_params", {}).get("k")
+        if k is None and v2:
+            k = float(v3 / v2) if v2 else None
+        if k is None:
+            k = 1.0
+        base_density = float(v2) if v2 else float(v3) / float(k if k != 0 else 1.0)
+
+        if k >= 1.0:
+            wrong_scales = [
+                float(rng.uniform(0.4, 0.7)),
+                float(rng.uniform(0.9, 1.2)),
+                float(rng.uniform(3.2, 4.0)),
+            ]
+        else:
+            wrong_scales = [
+                float(rng.uniform(0.1, 0.25)),
+                float(rng.uniform(0.8, 1.1)),
+                float(rng.uniform(1.6, 2.2)),
+            ]
+
+        def with_density(value: float) -> Scene:
+            objs = clone_objects(scene_c.objects)
+            objs[0].density = max(float(value), 1e-3)
+            return scene_from_objects(objs)
+
+        distractors = [with_density(base_density * s) for s in wrong_scales]
+        reasons = [
+            "密度比例显著偏小",
+            "密度比例不符合等比延续",
+            "密度比例显著偏大",
+        ]
+        return distractors, reasons
 
 
 @dataclass
@@ -354,30 +542,88 @@ class S11ShapeABA(Rule):
 
 
 @dataclass
-class S12ShapeABC(Rule):
+class S12ShapeChangeFollow(Rule):
     def __init__(self) -> None:
-        super().__init__("S12", RuleDifficulty.SIMPLE, "形状离散替换 ABC", "三步三种不同形状")
+        super().__init__("S12", RuleDifficulty.SIMPLE, "形状变化继承", "A->B 变化的位置在 C 继续变化")
 
     def sample_params(self, rng) -> Dict:
-        shapes = rng.choice(SHAPES, size=3, replace=False).tolist()
-        return {"shapes": shapes}
+        return {}
 
     def generate_triplet(self, params, rng):
-        shapes = params["shapes"]
-        objs = init_objects(rng, 1)
-        involved = [0]
-        objs[0].shape = shapes[0]
+        objs = init_objects(rng, 3, m=3)
+        involved = [0, 1, 2]
+        shapes_a = rng.choice(SHAPES, size=3, replace=True).tolist()
+        while len(set(shapes_a)) == 1:
+            shapes_a = rng.choice(SHAPES, size=3, replace=True).tolist()
+        for i, shape in enumerate(shapes_a):
+            objs[i].shape = shape
+
+        change_idx = int(rng.integers(0, 3))
+        shapes_b = list(shapes_a)
+        shape_b_choices = [s for s in SHAPES if s != shapes_a[change_idx]]
+        shapes_b[change_idx] = str(rng.choice(shape_b_choices))
+
+        shapes_c = list(shapes_b)
+        shape_c_choices = [s for s in SHAPES if s != shapes_b[change_idx]]
+        shapes_c[change_idx] = str(rng.choice(shape_c_choices))
+
         a_objs = clone_objects(objs)
         b_objs = clone_objects(objs)
-        b_objs[0] = switch_shape(b_objs[0], shapes[1])
         c_objs = clone_objects(objs)
-        c_objs[0] = switch_shape(c_objs[0], shapes[2])
+        for i in range(3):
+            b_objs[i] = switch_shape(b_objs[i], shapes_b[i])
+            c_objs[i] = switch_shape(c_objs[i], shapes_c[i])
         scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
-        v = [[shapes[0]], [shapes[1]], [shapes[2]]]
+        v = [shapes_a, shapes_b, shapes_c]
         meta = build_rule_meta(
-            self, "R1", 1, involved, ["s"], ["s(O0)"], "discrete", {"shapes": shapes}, v, scenes
+            self, "R1", 3, involved, ["s", "p"], ["shape_change_mask"], "discrete", {}, v, scenes
         )
         return scenes[0], scenes[1], scenes[2], meta
+
+    def make_distractors(self, scene_c: Scene, rng, meta: Dict) -> Tuple[list[Scene], list[str]]:
+        if len(scene_c.objects) < 3:
+            return [], []
+        v = meta.get("v", {})
+        shapes_a = v.get("v1")
+        shapes_b = v.get("v2")
+        if not shapes_a or not shapes_b:
+            return [], []
+        change_indices = [i for i, (sa, sb) in enumerate(zip(shapes_a, shapes_b)) if sa != sb]
+        if not change_indices:
+            return [], []
+        change_idx = int(change_indices[0])
+
+        shapes_c = [obj.shape for obj in scene_c.objects]
+
+        def with_shapes(shapes: List[str]) -> Scene:
+            objs = clone_objects(scene_c.objects)
+            for i, shape in enumerate(shapes):
+                objs[i] = switch_shape(objs[i], shape)
+            return scene_from_objects(objs)
+
+        wrong_no_change = with_shapes(shapes_b)
+
+        wrong_idx = (change_idx + 1) % 3
+        shapes_wrong_idx = list(shapes_c)
+        alt_shapes = [s for s in SHAPES if s != shapes_wrong_idx[wrong_idx]]
+        shapes_wrong_idx[wrong_idx] = str(rng.choice(alt_shapes))
+        wrong_change_other = with_shapes(shapes_wrong_idx)
+
+        shapes_extra = list(shapes_c)
+        extra_idx = (change_idx + 2) % 3
+        extra_choices = [s for s in SHAPES if s != shapes_extra[extra_idx]]
+        shapes_extra[extra_idx] = str(rng.choice(extra_choices))
+        wrong_extra_change = with_shapes(shapes_extra)
+
+        return [
+            wrong_no_change,
+            wrong_change_other,
+            wrong_extra_change,
+        ], [
+            "变化位置未延续（C 与 B 相同）",
+            "变化位置错误（在其他位置发生变化）",
+            "变化位置过多（出现额外变化）",
+        ]
 
 
 @dataclass
@@ -446,18 +692,13 @@ class S14Identity(Rule):
 
 def build_simple_rules() -> List[Rule]:
     return [
-        S01ScaleGeometric(),
         S02ScaleArithmetic(),
-        S03SingleAxisGeometric(),
-        S04AnisotropicToggle(),
+        S04AnisotropicGeometric(),
         S05FixedAxisRotation(),
         S06RotationDiscrete(),
         S07TranslationArithmetic(),
-        S08TranslationDiscrete(),
         S09DensityArithmetic(),
-        S10DensityGeometric(),
-        S11ShapeABA(),
-        S12ShapeABC(),
+        S12ShapeChangeFollow(),
         S13ScaleCentroidCoupled(),
         S14Identity(),
     ]

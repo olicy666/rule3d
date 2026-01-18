@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Dict, List, Sequence
+from typing import Dict, List, Sequence, Tuple
 
 import numpy as np
 
@@ -17,7 +17,6 @@ from .utils import (
     build_rule_meta,
     centroid,
     clone_objects,
-    contain,
     direction,
     dist,
     init_objects,
@@ -97,6 +96,40 @@ class M02DistanceGeometric(Rule):
         )
         return scenes[0], scenes[1], scenes[2], meta
 
+    def make_distractors(self, scene_c: Scene, rng, meta: Dict) -> Tuple[List[Scene], List[str]]:
+        if len(scene_c.objects) < 2:
+            return [], []
+        obj0, obj1 = scene_c.objects[0], scene_c.objects[1]
+        base_dist = dist(obj0, obj1)
+        if base_dist < 1e-6:
+            return [], []
+        base_dir = (obj1.p - obj0.p) / base_dist
+        origin = obj0.p.copy()
+        wrong_scales = [
+            float(rng.uniform(0.35, 0.55)),
+            float(rng.uniform(1.6, 2.2)),
+            float(rng.uniform(2.4, 3.0)),
+        ]
+
+        def place(dir_vec: np.ndarray, distance: float) -> Scene:
+            o0, o1 = clone_objects(scene_c.objects)
+            o0.p = origin.copy()
+            o1.p = origin + dir_vec * distance
+            return scene_from_objects([o0, o1])
+
+        alt_dir = _unit_vector(rng)
+        distractors = [
+            place(base_dir, base_dist * wrong_scales[0]),
+            place(base_dir, base_dist * wrong_scales[1]),
+            place(alt_dir, base_dist * wrong_scales[2]),
+        ]
+        reasons = [
+            "距离显著偏小，未满足等比延续",
+            "距离显著偏大，未满足等比延续",
+            "方向改变且距离偏离等比延续",
+        ]
+        return distractors, reasons
+
 
 @dataclass
 class M03DirectionLocked(Rule):
@@ -137,6 +170,41 @@ class M03DirectionLocked(Rule):
             scenes,
         )
         return scenes[0], scenes[1], scenes[2], meta
+
+    def make_distractors(self, scene_c: Scene, rng, meta: Dict) -> Tuple[List[Scene], List[str]]:
+        if len(scene_c.objects) < 2:
+            return [], []
+        obj0, obj1 = scene_c.objects[0], scene_c.objects[1]
+        base_dist = dist(obj0, obj1)
+        if base_dist < 1e-6:
+            return [], []
+        base_dir = (obj1.p - obj0.p) / base_dist
+        origin = obj0.p.copy()
+
+        def pick_far_dir() -> np.ndarray:
+            for _ in range(30):
+                v = _unit_vector(rng)
+                if abs(float(np.dot(v, base_dir))) < 0.3:
+                    return v
+            return _unit_vector(rng)
+
+        def place(dir_vec: np.ndarray, distance: float) -> Scene:
+            o0, o1 = clone_objects(scene_c.objects)
+            o0.p = origin.copy()
+            o1.p = origin + dir_vec * distance
+            return scene_from_objects([o0, o1])
+
+        distractors = [
+            place(pick_far_dir(), base_dist),
+            place(base_dir, base_dist * float(rng.uniform(1.7, 2.3))),
+            place(-base_dir, base_dist * float(rng.uniform(0.4, 0.7))),
+        ]
+        reasons = [
+            "方向变化过大，未保持同一方向",
+            "距离显著偏大，未满足等差延续",
+            "方向反向且距离偏小，不符合规则",
+        ]
+        return distractors, reasons
 
 
 @dataclass
@@ -187,6 +255,41 @@ class M04DirectionRotate(Rule):
         )
         return scenes[0], scenes[1], scenes[2], meta
 
+    def make_distractors(self, scene_c: Scene, rng, meta: Dict) -> Tuple[List[Scene], List[str]]:
+        if len(scene_c.objects) < 2:
+            return [], []
+        obj0, obj1 = scene_c.objects[0], scene_c.objects[1]
+        base_dist = dist(obj0, obj1)
+        if base_dist < 1e-6:
+            return [], []
+        base_dir = (obj1.p - obj0.p) / base_dist
+        origin = obj0.p.copy()
+        big_angle = float(rng.uniform(math.pi / 3, math.pi / 2))
+
+        def rotate_dir(angle: float) -> np.ndarray:
+            rot = np.array([[math.cos(angle), -math.sin(angle), 0], [math.sin(angle), math.cos(angle), 0], [0, 0, 1]])
+            return rot @ base_dir
+
+        def place(dir_vec: np.ndarray, distance: float) -> Scene:
+            o0, o1 = clone_objects(scene_c.objects)
+            o0.p = origin.copy()
+            o1.p = origin + dir_vec * distance
+            return scene_from_objects([o0, o1])
+
+        dist_far = base_dist * float(rng.uniform(1.6, 2.1))
+        dist_near = base_dist * float(rng.uniform(0.4, 0.7))
+        distractors = [
+            place(rotate_dir(big_angle), base_dist),
+            place(base_dir, dist_far),
+            place(rotate_dir(-big_angle), dist_near),
+        ]
+        reasons = [
+            "方向旋转幅度偏离等差规律",
+            "距离不保持恒定",
+            "方向与距离均偏离规则",
+        ]
+        return distractors, reasons
+
 
 @dataclass
 class M05TouchSequence(Rule):
@@ -230,44 +333,135 @@ class M05TouchSequence(Rule):
         )
         return scenes[0], scenes[1], scenes[2], meta
 
+    def make_distractors(self, scene_c: Scene, rng, meta: Dict) -> Tuple[List[Scene], List[str]]:
+        if len(scene_c.objects) < 2:
+            return [], []
+        obj0, obj1 = scene_c.objects[0], scene_c.objects[1]
+        touch_threshold = 0.6 * (np.linalg.norm(obj0.r) + np.linalg.norm(obj1.r)) + 0.05
+        direction_vec = _unit_vector(rng)
+        distances = [touch_threshold + rng.uniform(0.4, 0.8) for _ in range(3)]
+        distractors = []
+        reasons = []
+        for distance in distances:
+            o0, o1 = clone_objects(scene_c.objects)
+            o0.p = -direction_vec * distance / 2
+            o1.p = direction_vec * distance / 2
+            distractors.append(scene_from_objects([o0, o1]))
+            reasons.append("两物体距离过大，未接触")
+        return distractors, reasons
+
 
 @dataclass
-class M06ContainSequence(Rule):
+class M06ContainRatioArithmetic(Rule):
     def __init__(self) -> None:
-        super().__init__("M06", RuleDifficulty.MEDIUM, "包含关系序列", "contain 序列 0→1→0")
+        super().__init__("M06", RuleDifficulty.MEDIUM, "包含比例等差", "内含比例按等差变化")
 
     def sample_params(self, rng) -> Dict:
-        return {}
+        for _ in range(20):
+            base_ratio = float(rng.uniform(0.25, 0.65))
+            delta = float(rng.uniform(0.1, 0.2)) * (1 if rng.random() < 0.5 else -1)
+            r2 = base_ratio + delta
+            r3 = base_ratio + 2 * delta
+            if 0.1 <= r2 <= 0.9 and 0.1 <= r3 <= 0.9:
+                return {"base_ratio": base_ratio, "delta": delta}
+        return {"base_ratio": 0.6, "delta": -0.1}
 
     def generate_triplet(self, params, rng):
         outer = init_objects(rng, 1, m=2)[0]
         inner = init_objects(rng, 1, m=2)[1]
-        # Make sure outer is bigger.
-        outer.r = outer.r * 1.5
+        outer.r = np.maximum(outer.r, inner.r * 1.8)
         involved = [0, 1]
-        offset = rng.uniform(0.1, 0.25, size=3)
+        base_ratio = float(params["base_ratio"])
+        delta = float(params["delta"])
+        ratios = [base_ratio, base_ratio + delta, base_ratio + 2 * delta]
+        slack = outer.r / 2.0 - inner.r / 2.0
+        axis_idx = int(np.argmax(slack))
+        direction = 1 if rng.random() < 0.5 else -1
 
-        a_objs = [outer.copy(), apply_translation(inner, outer.p + offset - inner.p)]
-        b_inner = inner.copy()
-        b_inner.p = outer.p
-        b_objs = [outer.copy(), b_inner]
-        escape = outer.r * 0.8 + offset
-        c_objs = [outer.copy(), apply_translation(inner, outer.p + escape - inner.p)]
-        scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
-        v = [contain(*objs_pair) for objs_pair in [a_objs, b_objs, c_objs]]
+        def place(ratio: float):
+            o0, o1 = outer.copy(), inner.copy()
+            o0, o1 = self._place_ratio(o0, o1, ratio, axis_idx, direction)
+            return [o0, o1]
+
+        scenes_objs = [place(r) for r in ratios]
+        scenes = [scene_from_objects(x) for x in scenes_objs]
+        v = [self._contain_ratio(*objs_pair) for objs_pair in scenes_objs]
         meta = build_rule_meta(
             self,
             "R2",
             2,
             involved,
             ["p", "r"],
-            ["contain(0,1)"],
-            "discrete",
-            {"sequence": [0, 1, 0]},
+            ["contain_ratio(0,1)"],
+            "arithmetic",
+            {"delta": delta},
             v,
             scenes,
         )
         return scenes[0], scenes[1], scenes[2], meta
+
+    def make_distractors(self, scene_c: Scene, rng, meta: Dict) -> Tuple[List[Scene], List[str]]:
+        if len(scene_c.objects) < 2:
+            return [], []
+        outer = scene_c.objects[0].copy()
+        inner = scene_c.objects[1].copy()
+        target_ratio = meta.get("v", {}).get("v3", [self._contain_ratio(outer, inner)])[0]
+
+        def pick_wrong_ratio():
+            delta = float(rng.uniform(0.15, 0.3)) * (1 if rng.random() < 0.5 else -1)
+            ratio = float(np.clip(target_ratio + delta, 0.05, 0.95))
+            if abs(ratio - target_ratio) < 0.08:
+                ratio = float(np.clip(target_ratio - delta, 0.05, 0.95))
+            return ratio
+
+        def build_scene(ratio: float, scale_inner: bool = False, tweak_shape: bool = False, tweak_rot: bool = False):
+            o0, o1 = outer.copy(), inner.copy()
+            if scale_inner:
+                o1 = apply_scale(o1, float(rng.uniform(0.7, 0.85)))
+                o0.r = np.maximum(o0.r, o1.r * 1.6)
+            if tweak_shape:
+                shape_options = [s for s in SHAPES if s != o1.shape]
+                o1.shape = str(rng.choice(shape_options))
+            if tweak_rot:
+                o1 = apply_rotation(o1, rng.uniform(-0.4, 0.4, size=3))
+            slack = o0.r / 2.0 - o1.r / 2.0
+            axis_idx = int(np.argmax(slack))
+            direction = 1 if rng.random() < 0.5 else -1
+            o0, o1 = self._place_ratio(o0, o1, ratio, axis_idx, direction)
+            return scene_from_objects([o0, o1])
+
+        distractors = [
+            build_scene(pick_wrong_ratio(), scale_inner=False, tweak_shape=False, tweak_rot=False),
+            build_scene(pick_wrong_ratio(), scale_inner=True, tweak_shape=False, tweak_rot=False),
+            build_scene(pick_wrong_ratio(), scale_inner=True, tweak_shape=True, tweak_rot=True),
+        ]
+        reasons = [
+            "包含比例与等差规律不一致（位置偏移）",
+            "缩放内物体导致包含比例偏离等差规律",
+            "形状/旋转变化且包含比例不符合等差规律",
+        ]
+        return distractors, reasons
+
+    @staticmethod
+    def _contain_ratio(outer, inner) -> float:
+        outer_half = outer.r / 2.0
+        inner_half = inner.r / 2.0
+        slack = outer_half - inner_half
+        if np.any(slack <= 1e-6):
+            return 0.0
+        offset = inner.p - outer.p
+        min_margin = np.minimum(slack - offset, slack + offset)
+        ratio_axis = min_margin / slack
+        ratio = float(np.min(ratio_axis))
+        return max(0.0, min(1.0, ratio))
+
+    @staticmethod
+    def _place_ratio(outer, inner, ratio: float, axis_idx: int, direction: int):
+        slack = outer.r / 2.0 - inner.r / 2.0
+        offset = (1.0 - ratio) * slack[axis_idx]
+        inner.p = outer.p.copy()
+        inner.p[axis_idx] += direction * offset
+        return outer, inner
 
 
 @dataclass
@@ -277,7 +471,7 @@ class M07AngleArithmetic(Rule):
 
     def sample_params(self, rng) -> Dict:
         base_angle = float(rng.uniform(math.pi / 12, math.pi / 6))
-        delta = float(rng.uniform(math.pi / 18, math.pi / 10))
+        delta = float(rng.uniform(math.pi / 12, math.pi / 6))
         return {"base_angle": base_angle, "delta": delta}
 
     def generate_triplet(self, params, rng):
@@ -434,6 +628,30 @@ class M10OrderingCycle(Rule):
         )
         return scenes[0], scenes[1], scenes[2], meta
 
+    def make_distractors(self, scene_c: Scene, rng, meta: Dict) -> Tuple[List[Scene], List[str]]:
+        base_positions = [-0.8, 0.0, 0.8]
+        all_perms = [
+            [0, 1, 2],
+            [0, 2, 1],
+            [1, 0, 2],
+            [1, 2, 0],
+            [2, 0, 1],
+            [2, 1, 0],
+        ]
+        correct = order_indices_x(scene_c.objects)
+        wrong_perms = [p for p in all_perms if p != correct]
+        rng.shuffle(wrong_perms)
+        chosen = wrong_perms[:3]
+        distractors: List[Scene] = []
+        reasons: List[str] = []
+        for perm in chosen:
+            arranged = clone_objects(scene_c.objects)
+            for rank, obj_idx in enumerate(perm):
+                arranged[obj_idx].p[0] = base_positions[rank]
+            distractors.append(scene_from_objects(arranged))
+            reasons.append("x 轴排序未按循环置换")
+        return distractors, reasons
+
 
 @dataclass
 class M11CentroidArithmetic(Rule):
@@ -465,7 +683,7 @@ class M12DistanceVectorGeometric(Rule):
         super().__init__("M12", RuleDifficulty.MEDIUM, "距离集合等比缩放", "三对距离成等比")
 
     def sample_params(self, rng) -> Dict:
-        k = float(rng.uniform(1.15, 1.5))
+        k = float(rng.uniform(1.5, 2.0))
         return {"k": k}
 
     def generate_triplet(self, params, rng):
@@ -550,7 +768,7 @@ class M14DualSizeConservation(Rule):
         super().__init__("M14", RuleDifficulty.MEDIUM, "双对象属性联动", "size 和保持守恒")
 
     def sample_params(self, rng) -> Dict:
-        delta_ratio = float(rng.uniform(0.1, 0.25))
+        delta_ratio = float(rng.uniform(0.4, 0.8))
         sign = 1 if rng.random() < 0.5 else -1
         return {"delta_ratio": delta_ratio * sign}
 
@@ -592,18 +810,14 @@ class M14DualSizeConservation(Rule):
 
 def build_medium_rules() -> List[Rule]:
     return [
-        M01DistanceArithmetic(),
         M02DistanceGeometric(),
         M03DirectionLocked(),
         M04DirectionRotate(),
-        M05TouchSequence(),
-        M06ContainSequence(),
+        M06ContainRatioArithmetic(),
         M07AngleArithmetic(),
         M08AreaArithmetic(),
         M09DistanceDifferenceConserved(),
         M10OrderingCycle(),
-        M11CentroidArithmetic(),
         M12DistanceVectorGeometric(),
-        M13SymmetrySwitch(),
         M14DualSizeConservation(),
     ]

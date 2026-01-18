@@ -387,8 +387,6 @@ class C12AreaDistanceCoupled(Rule):
 def build_complex_rules() -> List[Rule]:
     return [
         C01ScaleRotateCoupled(),
-        C02PiecewiseChange(),
-        C03ConditionalShapeScale(),
         C08SymmetryRigid(),
         C09GroupCentroidDistance(),
         C10RigidTransform(),

@@ -1,6 +1,6 @@
 # Rule3D：基于规则的多几何体点云推理数据集生成器
 
-本项目实现 `program.md` 中的“数学原型”版生成器：每题输出 6 个点云（1/2 为参考帧 A/B，3/4/5/6 为四个候选，其中仅 1 个正确）和 `meta.json`，同时根目录提供所有题目的 `meta.json` 列表。规则总数 36（移除 R4 拓扑类），每帧场景由 2~3 个几何体组成。
+本项目实现 `program.md` 中的“数学原型”版生成器：每题输出 6 个点云（1/2 为参考帧 A/B，3/4/5/6 为四个候选，其中仅 1 个正确）和 `meta.json`，同时根目录提供所有题目的 `meta.json` 列表。规则总数 25（移除 R4 拓扑类），每帧场景由 2~3 个几何体组成。
 
 ## 快速开始
 环境：Python 3.10+，依赖仅 `numpy`。
@@ -44,6 +44,7 @@ output/meta.json  # 所有题目的 meta 列表
 - 单体：$$\text{size}(O)=r_x r_y r_z,\quad \text{ar}(O)=(\tfrac{r_x}{r_y},\tfrac{r_y}{r_z}),\quad \text{axis}_k(O)=R e_k,\quad \text{den}(O)=d$$
 - 成对：$$\text{dist}(i,j)=\|p_i-p_j\|_2,\quad \text{dir}(i,j)=\tfrac{p_j-p_i}{\|p_j-p_i\|_2+\epsilon},\quad \text{ang}(i,j)=\arccos(\langle\text{axis}_1(i),\text{axis}_1(j)\rangle)$$
   $$\text{touch}(i,j)=\mathbf{1}[\text{dist}\le \rho_i+\rho_j+\tau],\quad \text{contain}(i,j)=\mathbf{1}[\text{AABB}(i)\supseteq\text{AABB}(j)]$$
+  $$\text{contain\_ratio}(i,j)=\min_k \frac{\min(a^{max}_k-b^{max}_k,\,b^{min}_k-a^{min}_k)}{(a^{max}_k-a^{min}_k)/2-(b^{max}_k-b^{min}_k)/2}$$
 - 多体：$$\text{cent}(S)=\tfrac{1}{|S|}\sum_{i\in S}p_i,\quad \text{area}(1,2,3)=\tfrac{1}{2}\|(p_2-p_1)\times(p_3-p_1)\|$$
   $$\text{ord}_x(S)=\text{argsort}([p_{i,x}]),\quad \text{sym}(S)=\mathbf{1}[\forall i\,\exists j:\|p_j-\pi_n(p_i)\|\le\delta]$$
 
@@ -54,47 +55,36 @@ output/meta.json  # 所有题目的 meta 列表
 - 刚体/仿射：$$p_{t+1}=Q p_t + t,\quad R_{t+1}=Q R_t$$
 - 联动：多变量守恒/耦合（质心恒定、距离和恒定等）。
 
-## 规则清单（36 条：14 Simple + 14 Medium + 8 Complex）
+## 规则清单（25 条：9 Simple + 10 Medium + 6 Complex）
 所有规则 meta 包含 `rule_id, rule_group(R1/R2/R3), difficulty, K_R, involved_indices, base_attrs_used, derived_funcs, pattern_type, pattern_params, v1/v2/v3`。
 
-### R1 物体属性推理（S01–S14 + M14 + C01–C03）
-- **S01 等比统一缩放**：$$r_2=k r_1,\ r_3=k r_2$$
+### R1 物体属性推理（S02,S04–S07,S09,S12–S14 + M14 + C01）
 - **S02 等差统一缩放**：$$\text{size}_2-\text{size}_1=\Delta,\ \text{size}_3=2\text{size}_2-\text{size}_1$$
-- **S03 单轴比例等比**：$$r_{2,x}=k r_{1,x},\ r_{3,x}=k r_{2,x}$$
-- **S04 各向异性比例切换**：$$(\text{ar}_1,\text{ar}_2,\text{ar}_3)=(c_1,c_2,c_1)$$
+- **S04 各向异性等比拉伸**：$$r_{t+1}=r_t\odot s,\ s_{axis}=k,\ s_{\text{others}}=\tfrac{1}{\sqrt{k}}\ \Rightarrow\ \text{vol 保持}$$
 - **S05 固定轴旋转**：$$R_{t+1}=R_t\cdot\text{Rot}(\hat{u},\theta)$$
 - **S06 旋转离散循环**：$$(R_1,R_2,R_3)=(Q_0,Q_{90},Q_{180})$$
 - **S07 固定向量平移**：$$p_{t+1}=p_t+\Delta p$$
-- **S08 平移离散开关**：$$(p_1,p_2,p_3)=(c_1,c_2,c_1)$$
 - **S09 密度等差**：$$d_2-d_1=\Delta,\ d_3=2d_2-d_1$$
-- **S10 密度等比**：$$d_2=k d_1,\ d_3=k d_2$$
-- **S11 形状替换 ABA**：$$(s_1,s_2,s_3)=(a,b,a)$$
-- **S12 形状替换 ABC**：$$(s_1,s_2,s_3)=(a,b,c),\ a\neq b\neq c$$
+- **S12 形状变化继承**：A→B 哪些位置形状改变，B→C 在相同位置继续改变
 - **S13 尺度-位置联动**：$$\text{cent}(S_t)=\text{const},\ r_{t+1}=k r_t,\ p_{t+1}=p_t+\delta p$$
 - **S14 恒等**：$$(s,r,p,R,d)_1=(s,r,p,R,d)_2=(s,r,p,R,d)_3$$
 - **M14 双对象守恒**：$$\text{size}(i)_t+\text{size}(j)_t=C,\ \text{size}(i)\ \text{递增},\ \text{size}(j)\ \text{递减}$$
 - **C01 复合属性**：$$r_{t+1}=k r_t,\ R_{t+1}=R_t\text{Rot}(\hat{u},\theta)$$
-- **C02 分段序列**：$$v_2=v_1+\Delta,\ v_3=v_2$$
-- **C03 条件触发**：$$s_2\ne s_1\Rightarrow \text{size}_2=k\text{size}_1,\ s_3=s_2\Rightarrow \text{size}_3=\text{size}_2$$
 
-### R2 成对空间关系推理（M01–M07 + M09 + C10–C11）
-- **M01 成对距离等差**：$$\text{dist}_3=2\text{dist}_2-\text{dist}_1$$
+### R2 成对空间关系推理（M02–M04 + M06–M07 + M09 + C10–C11）
 - **M02 成对距离等比**：$$\text{dist}_2=k\text{dist}_1,\ \text{dist}_3=k\text{dist}_2$$
 - **M03 方向保持**：$$\text{dir}_1=\text{dir}_2=\text{dir}_3,\ \text{dist}\ \text{线性/等比}$$
 - **M04 方向旋转等差角**：$$\angle(\text{dir}_t,\text{dir}_{t+1})=\theta,\ \text{dist}\ \text{恒定}$$
-- **M05 接触序列**：$$(\text{touch}_1,\text{touch}_2,\text{touch}_3)=(0,1,1)$$
-- **M06 包含序列**：$$(\text{contain}_1,\text{contain}_2,\text{contain}_3)=(0,1,0)$$
+- **M06 包含比例等差**：$$\rho_{t+1}-\rho_t=\Delta,\ \rho_t\in(0,1)$$
 - **M07 夹角等差**：$$\text{ang}_3=2\text{ang}_2-\text{ang}_1$$
 - **M09 距离差分守恒**：$$\text{dist}(i,j)-\text{dist}(k,l)=C,\ \forall t$$
 - **C10 刚体一致变换**：集合施加相同刚体，任意成对距离保持不变。
 - **C11 相对姿态保持**：共同旋转 $$R^{(i)}_{t+1}=Q R^{(i)}_t$$，夹角恒定。
 
-### R3 多物体构型推理（M08 + M10–M13 + C08–C09 + C12）
+### R3 多物体构型推理（M08 + M10 + M12 + C08–C09 + C12）
 - **M08 三对象面积等差**：$$\text{area}_3=2\text{area}_2-\text{area}_1$$
 - **M10 排序模式循环**：$$\text{ord}_x(S_1),\text{ord}_x(S_2),\text{ord}_x(S_3)\ \text{按固定置换}$$
-- **M11 集合质心等差**：$$c_{t+1}=c_t+\Delta c$$
 - **M12 距离集合等比**：$$v_{t+1}=k v_t,\ v_t=[\text{dist}(1,2),\text{dist}(1,3),\text{dist}(2,3)]$$
-- **M13 对称性开关**：$$(\text{sym}_1,\text{sym}_2,\text{sym}_3)=(0,1,1)$$
 - **C08 对称+刚体**：$\text{sym}(S_2)=1,\ X_3=Q X_2+t$
 - **C09 组间质心距离等差**：$$u_t=\|\text{cent}(S_a)-\text{cent}(S_b)\|,\ u_3=2u_2-u_1$$
 - **C12 面积-边长守恒**：$$\text{area}(1,2,3)\cdot \text{dist}(1,2)=C$$
@@ -104,7 +94,7 @@ output/meta.json  # 所有题目的 meta 列表
 ## 目录结构
 - `main.py`：CLI 入口与模式选择
 - `raven3d/scene.py`：`ObjectState`/`Scene` 多物体采样
-- `raven3d/rules/`：36 条规则（按 simple/medium/complex 划分）
+- `raven3d/rules/`：25 条规则（按 simple/medium/complex 划分）
 - `raven3d/dataset.py`：样本生成与 meta 写出
 - `program.md`：实施要求
 

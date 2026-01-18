@@ -317,7 +317,10 @@ def safe_slug(text: str) -> str:
 def load_records() -> pd.DataFrame:
     if not RECORDS_PATH.exists():
         return pd.DataFrame(columns=RECORD_COLUMNS)
-    df = pd.read_csv(RECORDS_PATH)
+    try:
+        df = pd.read_csv(RECORDS_PATH)
+    except pd.errors.ParserError:
+        df = pd.read_csv(RECORDS_PATH, engine="python", on_bad_lines="skip")
     for col in RECORD_COLUMNS:
         if col not in df.columns:
             df[col] = None
