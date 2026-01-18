@@ -58,8 +58,11 @@ class S02ScaleArithmetic(Rule):
         super().__init__("S02", RuleDifficulty.SIMPLE, "等差统一缩放", "size 按等差递进")
 
     def sample_params(self, rng) -> Dict:
-        delta_ratio = float(rng.uniform(0.3, 0.55))
         sign = -1.0 if rng.random() < 0.5 else 1.0
+        if sign < 0:
+            delta_ratio = float(rng.uniform(0.3, 0.45))
+        else:
+            delta_ratio = float(rng.uniform(0.3, 0.55))
         return {"delta_ratio": delta_ratio * sign}
 
     def generate_triplet(self, params, rng):
@@ -67,7 +70,10 @@ class S02ScaleArithmetic(Rule):
         involved = [0]
         base_obj = objs[0]
         base_size = size(base_obj)
-        delta = base_size * params["delta_ratio"]
+        delta_ratio = float(params["delta_ratio"])
+        if delta_ratio < -0.45:
+            delta_ratio = -0.45
+        delta = base_size * delta_ratio
         target_b = base_size + delta
         factor_b = (target_b / base_size) ** (1 / 3)
         target_c = target_b + delta
