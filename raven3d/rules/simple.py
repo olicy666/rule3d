@@ -253,7 +253,7 @@ class R1_3FixedAxisRotation(Rule):
 
     def sample_params(self, rng) -> Dict:
         axis_idx = int(rng.integers(0, 3))
-        theta = float(rng.uniform(math.pi / 10, math.pi / 5))
+        theta = float(rng.uniform(math.pi / 5, 2 * math.pi / 5))
         return {"axis": axis_idx, "theta": theta}
 
     def generate_triplet(self, params, rng):
@@ -276,6 +276,36 @@ class R1_3FixedAxisRotation(Rule):
         )
         return scenes[0], scenes[1], scenes[2], meta
 
+    def make_distractors(self, scene_c: Scene, rng, meta: Dict) -> Tuple[list[Scene], list[str]]:
+        if not scene_c.objects:
+            return [], []
+        axis_idx = int(meta.get("pattern_params", {}).get("axis", 0))
+        theta = float(meta.get("pattern_params", {}).get("theta", math.pi / 6))
+        delta_vec = np.zeros(3)
+        delta_vec[axis_idx] = theta
+        alt_axis = (axis_idx + 1) % 3
+        alt_delta = np.zeros(3)
+        alt_delta[alt_axis] = theta
+
+        base_rot = scene_c.objects[0].rotation - 2 * delta_vec
+
+        def with_rotation(rot_vec: np.ndarray) -> Scene:
+            objs = clone_objects(scene_c.objects)
+            objs[0].rotation = rot_vec.copy()
+            return scene_from_objects(objs)
+
+        distractors = [
+            with_rotation(base_rot),
+            with_rotation(base_rot + 3 * delta_vec),
+            with_rotation(base_rot + 2 * alt_delta),
+        ]
+        reasons = [
+            "旋转幅度不足，未按等差延续",
+            "旋转幅度过大，未按等差延续",
+            "旋转轴错误",
+        ]
+        return distractors, reasons
+
 
 @dataclass
 class R1_4RotationDiscrete(Rule):
@@ -289,6 +319,8 @@ class R1_4RotationDiscrete(Rule):
     def generate_triplet(self, params, rng):
         axis_idx = params["axis"]
         objs = init_objects(rng, 1)
+        non_sphere = [s for s in SHAPES if s != "sphere"]
+        objs[0].shape = str(rng.choice(non_sphere))
         involved = [0]
         base = objs[0]
         deltas = [0.0, math.pi / 2, math.pi]
@@ -405,7 +437,7 @@ class R1_6DensityArithmetic(Rule):
         super().__init__("R1-6", RuleDifficulty.SIMPLE, "密度等差", "density 按等差变化")
 
     def sample_params(self, rng) -> Dict:
-        delta_ratio = float(rng.uniform(0.6, 0.9))
+        delta_ratio = float(rng.uniform(0.9, 1.3))
         sign = -1.0 if rng.random() < 0.5 else 1.0
         return {"delta_ratio": delta_ratio * sign}
 
@@ -701,9 +733,52 @@ class R1_9Identity(Rule):
         scenes = [scene, scene_from_objects(clone_objects(objs)), scene_from_objects(clone_objects(objs))]
         v = [["same"], ["same"], ["same"]]
         meta = build_rule_meta(
-            self, "R1", 0, involved, ["s", "r", "p", "R", "d"], ["identity"], "constant", {}, v, scenes
+            self, "R1", 0, involved, ["s", "r", "p", "R", "d", "c"], ["identity"], "constant", {}, v, scenes
         )
         return scenes[0], scenes[1], scenes[2], meta
+
+    def make_distractors(self, scene_c: Scene, rng, meta: Dict) -> Tuple[list[Scene], list[str]]:
+        if not scene_c.objects:
+            return [], []
+        attrs = ["s", "r", "p", "R", "d", "c"]
+        geom_attrs = ["s", "r", "p", "R", "d"]
+        attr_map = {"s": "形状", "r": "尺度", "p": "位置", "R": "位姿", "d": "密度", "c": "颜色"}
+        distractors = []
+        reasons = []
+        for _ in range(3):
+            objs = clone_objects(scene_c.objects)
+            subset_size = int(rng.integers(1, len(attrs) + 1))
+            subset = rng.choice(attrs, size=subset_size, replace=False).tolist()
+            if not set(subset).intersection(geom_attrs):
+                subset.append(str(rng.choice(geom_attrs)))
+            for attr in subset:
+                idx = int(rng.integers(0, len(objs)))
+                obj = objs[idx]
+                if attr == "s":
+                    options = [s for s in SHAPES if s != obj.shape]
+                    new_obj = obj.copy()
+                    new_obj.shape = str(rng.choice(options))
+                    objs[idx] = new_obj
+                elif attr == "r":
+                    factor = float(rng.uniform(0.6, 0.85) if rng.random() < 0.5 else rng.uniform(1.15, 1.5))
+                    objs[idx] = apply_scale(obj, factor)
+                elif attr == "p":
+                    delta = rng.uniform(0.2, 0.5, size=3) * rng.choice([-1, 1], size=3)
+                    objs[idx] = apply_translation(obj, delta)
+                elif attr == "R":
+                    delta = rng.uniform(0.4, 0.8, size=3) * rng.choice([-1, 1], size=3)
+                    objs[idx] = apply_rotation(obj, delta)
+                elif attr == "d":
+                    factor = float(rng.uniform(0.5, 0.8) if rng.random() < 0.5 else rng.uniform(1.2, 1.6))
+                    objs[idx] = apply_density(obj, factor)
+                elif attr == "c":
+                    new_obj = obj.copy()
+                    new_obj.color = rng.uniform(0.0, 1.0, size=3)
+                    objs[idx] = new_obj
+            reason = "扰动属性：" + "、".join(attr_map[a] for a in subset)
+            distractors.append(scene_from_objects(objs))
+            reasons.append(reason)
+        return distractors, reasons
 
 
 def build_simple_rules() -> List[Rule]:

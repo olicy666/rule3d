@@ -778,6 +778,12 @@ class R1_10DualSizeConservation(Rule):
         s0, s1 = size(objs[0]), size(objs[1])
         total = s0 + s1
         delta = s0 * params["delta_ratio"]
+        # Keep both steps in bounds: s0 + 2*delta > 0 and s1 - 2*delta > 0.
+        eps = 1e-6
+        if delta >= 0:
+            delta = min(delta, 0.5 * s1 - eps)
+        else:
+            delta = max(delta, -0.5 * s0 + eps)
 
         def resize_pair(base0, base1, delta_val):
             target0 = base0 + delta_val
