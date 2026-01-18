@@ -105,9 +105,9 @@ class R1_1ScaleArithmetic(Rule):
         base_size = float(v2) if v2 is not None else float(v3) - float(delta)
 
         wrong_deltas = [
-            delta * float(rng.uniform(1.6, 2.3)),
-            delta * float(rng.uniform(0.3, 0.6)),
-            -delta * float(rng.uniform(1.1, 1.8)),
+            delta * float(rng.uniform(2.0, 3.0)),
+            delta * float(rng.uniform(0.15, 0.35)),
+            -delta * float(rng.uniform(1.5, 2.5)),
         ]
 
         def with_size(target_size: float) -> Scene:
@@ -205,8 +205,6 @@ class R1_2AnisotropicGeometric(Rule):
             return [], []
         factor = float(meta.get("pattern_params", {}).get("factor", 1.4))
         axis_idx = int(meta.get("pattern_params", {}).get("axis", 0))
-        base = scene_c.objects[0]
-
         def with_scale(scale: np.ndarray) -> Scene:
             objs = clone_objects(scene_c.objects)
             objs[0] = apply_scale(objs[0], scale)
@@ -219,11 +217,15 @@ class R1_2AnisotropicGeometric(Rule):
             if i != axis_idx:
                 good_scale[i] = squeeze
 
-        bad_uniform = np.ones(3) * factor
+        bad_skew = good_scale.copy()
+        other_axes = [i for i in range(3) if i != axis_idx]
+        bad_skew[other_axes[0]] = squeeze * 0.6
+        bad_skew[other_axes[1]] = squeeze * 1.4
+
         bad_nonconst = np.ones(3)
         bad_nonconst[axis_idx] = factor
-        bad_nonconst[(axis_idx + 1) % 3] = 1.0
-        bad_nonconst[(axis_idx + 2) % 3] = 1.0
+        bad_nonconst[other_axes[0]] = 1.0
+        bad_nonconst[other_axes[1]] = 1.0
 
         flip_scale = good_scale.copy()
         flip_scale[axis_idx] = 1.0 / factor
@@ -232,12 +234,12 @@ class R1_2AnisotropicGeometric(Rule):
                 flip_scale[i] = math.sqrt(factor)
 
         distractors = [
-            with_scale(bad_uniform),
+            with_scale(bad_skew),
             with_scale(bad_nonconst),
             with_scale(flip_scale),
         ]
         reasons = [
-            "各向同性放大，体积未保持且比例不符",
+            "非等比拉伸，比例不符",
             "仅单轴放大，体积不守恒",
             "拉伸方向相反，比例不符",
         ]

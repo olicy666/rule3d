@@ -27,6 +27,10 @@ def random_density(rng: np.random.Generator) -> float:
     return float(rng.uniform(0.8, 1.2))
 
 
+def random_color(rng: np.random.Generator, low: float = 0.2, high: float = 1.0) -> np.ndarray:
+    return rng.uniform(low, high, size=3)
+
+
 def random_object(rng: np.random.Generator, shape: str | None = None) -> ObjectState:
     shape = shape or str(rng.choice(SHAPES))
     return ObjectState(
@@ -35,6 +39,7 @@ def random_object(rng: np.random.Generator, shape: str | None = None) -> ObjectS
         p=random_center(rng),
         rotation=random_rotation(rng),
         density=random_density(rng),
+        color=random_color(rng),
     )
 
 

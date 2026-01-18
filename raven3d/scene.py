@@ -18,6 +18,7 @@ class ObjectState:
     p: np.ndarray  # translation (centroid)
     rotation: np.ndarray  # Euler angles (radians)
     density: float = 1.0  # sampling weight
+    color: np.ndarray = field(default_factory=lambda: np.array([1.0, 1.0, 1.0]))
 
     def copy(self) -> "ObjectState":
         return ObjectState(
@@ -26,6 +27,7 @@ class ObjectState:
             p=self.p.copy(),
             rotation=self.rotation.copy(),
             density=float(self.density),
+            color=self.color.copy(),
         )
 
     def rotation_matrix(self) -> np.ndarray:
@@ -61,6 +63,7 @@ class ObjectState:
             "R": rot_mat.tolist(),
             "rotation_euler": self.rotation.tolist(),
             "density": float(self.density),
+            "color": self.color.tolist(),
             "volume": self.volume(),
         }
 

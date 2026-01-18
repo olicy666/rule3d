@@ -37,10 +37,10 @@ output/meta.json  # 所有题目的 meta 列表
 
 ## 数学对象定义
 - 场景帧：$$X_t = \{O_{t,1}, \dots, O_{t,M_t}\},\quad M_t \in \{2,3\}$$
-- 物体基础属性：$$s \in \{\texttt{cube},\texttt{sphere},\texttt{cylinder},\texttt{cone}\},\quad r=(r_x,r_y,r_z),\quad p\in\mathbb{R}^3,\quad R\in SO(3),\quad d\in\mathbb{R}_+$$
+- 物体基础属性：$$s \in \{\texttt{cube},\texttt{sphere},\texttt{cylinder},\texttt{cone}\},\quad r=(r_x,r_y,r_z),\quad p\in\mathbb{R}^3,\quad R\in SO(3),\quad d\in\mathbb{R}_+,\quad c\in[0,1]^3$$（形状、尺度、位置、位姿、密度、颜色）
 - 采样：按权重 $$w_i = d_i\cdot\text{vol}(r_i)$$ 分配总点数到各物体，合并后写入同一 ply；meta 中保留对象级参数。
 
-## 派生函数（仅依赖 (s,r,p,R,d)）
+## 派生函数（仅依赖 (s,r,p,R,d,c)）
 - 单体：$$\text{size}(O)=r_x r_y r_z,\quad \text{ar}(O)=(\tfrac{r_x}{r_y},\tfrac{r_y}{r_z}),\quad \text{axis}_k(O)=R e_k,\quad \text{den}(O)=d$$
 - 成对：$$\text{dist}(i,j)=\|p_i-p_j\|_2,\quad \text{dir}(i,j)=\tfrac{p_j-p_i}{\|p_j-p_i\|_2+\epsilon},\quad \text{ang}(i,j)=\arccos(\langle\text{axis}_1(i),\text{axis}_1(j)\rangle)$$
   $$\text{touch}(i,j)=\mathbf{1}[\text{dist}\le \rho_i+\rho_j+\tau],\quad \text{contain}(i,j)=\mathbf{1}[\text{AABB}(i)\supseteq\text{AABB}(j)]$$
@@ -67,7 +67,7 @@ output/meta.json  # 所有题目的 meta 列表
 - **R1-6 密度等差**：$$d_2-d_1=\Delta,\ d_3=2d_2-d_1$$
 - **R1-7 形状变化继承**：A→B 哪些位置形状改变，B→C 在相同位置继续改变
 - **R1-8 尺度-位置联动**：$$\text{cent}(S_t)=\text{const},\ r_{t+1}=k r_t,\ p_{t+1}=p_t+\delta p$$
-- **R1-9 恒等**：$$(s,r,p,R,d)_1=(s,r,p,R,d)_2=(s,r,p,R,d)_3$$
+- **R1-9 恒等**：$$(s,r,p,R,d,c)_1=(s,r,p,R,d,c)_2=(s,r,p,R,d,c)_3$$
 - **R1-10 双对象守恒**：$$\text{size}(i)_t+\text{size}(j)_t=C,\ \text{size}(i)\ \text{递增},\ \text{size}(j)\ \text{递减}$$
 - **R1-11 复合属性**：$$r_{t+1}=k r_t,\ R_{t+1}=R_t\text{Rot}(\hat{u},\theta)$$
 

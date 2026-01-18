@@ -1,7 +1,7 @@
 ## 规则原型概要
 
 - 场景：$$X_t=\{O_{t,1},\dots,O_{t,M_t}\},\ M_t\in\{2,3\}$$
-- 物体属性：$$s,r,p,R,d$$（形状、尺度、位置、旋转、密度）
+- 物体属性：$$s,r,p,R,d,c$$（形状、尺度、位置、位姿、密度、颜色）
 - 主要派生函数：`size, ar, axis, den, dist, dir, ang, touch, contain, cent, area, ord_x, sym`
 - 模式变换：等差、等比、离散序列、刚体/仿射、联动守恒。
 - meta 记录：`rule_id, rule_group, difficulty, K_R, involved_indices, base_attrs_used, derived_funcs, pattern_type, pattern_params, v1/v2/v3, M_t, frames`
