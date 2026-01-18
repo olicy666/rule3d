@@ -104,7 +104,11 @@ class S02ScaleArithmetic(Rule):
             objs = clone_objects(scene_c.objects)
             cur_size = size(objs[0])
             if cur_size > 1e-6:
-                scale = (target_size / cur_size) ** (1 / 3)
+                safe_target = float(target_size)
+                if not math.isfinite(safe_target) or safe_target <= 1e-6:
+                    # Keep the target size positive to avoid complex scaling.
+                    safe_target = max(cur_size * 0.2, 1e-6)
+                scale = (safe_target / cur_size) ** (1 / 3)
                 objs[0] = apply_scale(objs[0], scale)
             return scene_from_objects(objs)
 
