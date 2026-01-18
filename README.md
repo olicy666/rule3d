@@ -13,9 +13,9 @@ python main.py --output output --num-samples 3 --points 4096 --seed 0
   - 大类：`r1-only`, `r2-only`, `r3-only`
   - 消融：`all-minus-r1`, `all-minus-r2`, `all-minus-r3`
   - （已删除 `r4-only` 与 `all-minus-r4`）
-- `--rules` 自定义规则列表（逗号分隔，如 `S01,M04,C02`，会覆盖 `--mode`）
+- `--rules` 自定义规则列表（逗号分隔，如 `R1-1,R2-3,R3-2`，会覆盖 `--mode`）
   - 仅从给定规则编号中采样题目，编号不区分大小写，非法编号会直接报错提示可选列表。
-  - 示例：`python main.py --num-samples 5 --rules S01,M04,C02 --points 4096`
+  - 示例：`python main.py --num-samples 5 --rules R1-1,R2-3,R3-2 --points 4096`
 - 规则采样：当前对可用规则等概率随机采样（`--simple-prob / --medium-prob / --complex-prob` 已弃用）。
 - 其他：`--output`, `--num-samples`, `--points`, `--seed`。
 示例：`python main.py --num-samples 10 --mode r2-only --points 4096`
@@ -58,36 +58,36 @@ output/meta.json  # 所有题目的 meta 列表
 ## 规则清单（25 条：9 Simple + 10 Medium + 6 Complex）
 所有规则 meta 包含 `rule_id, rule_group(R1/R2/R3), difficulty, K_R, involved_indices, base_attrs_used, derived_funcs, pattern_type, pattern_params, v1/v2/v3`。
 
-### R1 物体属性推理（S02,S04–S07,S09,S12–S14 + M14 + C01）
-- **S02 等差统一缩放**：$$\text{size}_2-\text{size}_1=\Delta,\ \text{size}_3=2\text{size}_2-\text{size}_1$$
-- **S04 各向异性等比拉伸**：$$r_{t+1}=r_t\odot s,\ s_{axis}=k,\ s_{\text{others}}=\tfrac{1}{\sqrt{k}}\ \Rightarrow\ \text{vol 保持}$$
-- **S05 固定轴旋转**：$$R_{t+1}=R_t\cdot\text{Rot}(\hat{u},\theta)$$
-- **S06 旋转离散循环**：$$(R_1,R_2,R_3)=(Q_0,Q_{90},Q_{180})$$
-- **S07 固定向量平移**：$$p_{t+1}=p_t+\Delta p$$
-- **S09 密度等差**：$$d_2-d_1=\Delta,\ d_3=2d_2-d_1$$
-- **S12 形状变化继承**：A→B 哪些位置形状改变，B→C 在相同位置继续改变
-- **S13 尺度-位置联动**：$$\text{cent}(S_t)=\text{const},\ r_{t+1}=k r_t,\ p_{t+1}=p_t+\delta p$$
-- **S14 恒等**：$$(s,r,p,R,d)_1=(s,r,p,R,d)_2=(s,r,p,R,d)_3$$
-- **M14 双对象守恒**：$$\text{size}(i)_t+\text{size}(j)_t=C,\ \text{size}(i)\ \text{递增},\ \text{size}(j)\ \text{递减}$$
-- **C01 复合属性**：$$r_{t+1}=k r_t,\ R_{t+1}=R_t\text{Rot}(\hat{u},\theta)$$
+### R1 物体属性推理（R1-1–R1-11）
+- **R1-1 等差统一缩放**：$$\text{size}_2-\text{size}_1=\Delta,\ \text{size}_3=2\text{size}_2-\text{size}_1$$
+- **R1-2 各向异性等比拉伸**：$$r_{t+1}=r_t\odot s,\ s_{axis}=k,\ s_{\text{others}}=\tfrac{1}{\sqrt{k}}\ \Rightarrow\ \text{vol 保持}$$
+- **R1-3 固定轴旋转**：$$R_{t+1}=R_t\cdot\text{Rot}(\hat{u},\theta)$$
+- **R1-4 旋转离散循环**：$$(R_1,R_2,R_3)=(Q_0,Q_{90},Q_{180})$$
+- **R1-5 固定向量平移**：$$p_{t+1}=p_t+\Delta p$$
+- **R1-6 密度等差**：$$d_2-d_1=\Delta,\ d_3=2d_2-d_1$$
+- **R1-7 形状变化继承**：A→B 哪些位置形状改变，B→C 在相同位置继续改变
+- **R1-8 尺度-位置联动**：$$\text{cent}(S_t)=\text{const},\ r_{t+1}=k r_t,\ p_{t+1}=p_t+\delta p$$
+- **R1-9 恒等**：$$(s,r,p,R,d)_1=(s,r,p,R,d)_2=(s,r,p,R,d)_3$$
+- **R1-10 双对象守恒**：$$\text{size}(i)_t+\text{size}(j)_t=C,\ \text{size}(i)\ \text{递增},\ \text{size}(j)\ \text{递减}$$
+- **R1-11 复合属性**：$$r_{t+1}=k r_t,\ R_{t+1}=R_t\text{Rot}(\hat{u},\theta)$$
 
-### R2 成对空间关系推理（M02–M04 + M06–M07 + M09 + C10–C11）
-- **M02 成对距离等比**：$$\text{dist}_2=k\text{dist}_1,\ \text{dist}_3=k\text{dist}_2$$
-- **M03 方向保持**：$$\text{dir}_1=\text{dir}_2=\text{dir}_3,\ \text{dist}\ \text{线性/等比}$$
-- **M04 方向旋转等差角**：$$\angle(\text{dir}_t,\text{dir}_{t+1})=\theta,\ \text{dist}\ \text{恒定}$$
-- **M06 包含比例等差**：$$\rho_{t+1}-\rho_t=\Delta,\ \rho_t\in(0,1)$$
-- **M07 夹角等差**：$$\text{ang}_3=2\text{ang}_2-\text{ang}_1$$
-- **M09 距离差分守恒**：$$\text{dist}(i,j)-\text{dist}(k,l)=C,\ \forall t$$
-- **C10 刚体一致变换**：集合施加相同刚体，任意成对距离保持不变。
-- **C11 相对姿态保持**：共同旋转 $$R^{(i)}_{t+1}=Q R^{(i)}_t$$，夹角恒定。
+### R2 成对空间关系推理（R2-1–R2-8）
+- **R2-1 成对距离等比**：$$\text{dist}_2=k\text{dist}_1,\ \text{dist}_3=k\text{dist}_2$$
+- **R2-2 方向保持**：$$\text{dir}_1=\text{dir}_2=\text{dir}_3,\ \text{dist}\ \text{线性/等比}$$
+- **R2-3 方向旋转等差角**：$$\angle(\text{dir}_t,\text{dir}_{t+1})=\theta,\ \text{dist}\ \text{恒定}$$
+- **R2-4 包含比例等差**：$$\rho_{t+1}-\rho_t=\Delta,\ \rho_t\in(0,1)$$
+- **R2-5 夹角等差**：$$\text{ang}_3=2\text{ang}_2-\text{ang}_1$$
+- **R2-6 距离差分守恒**：$$\text{dist}(i,j)-\text{dist}(k,l)=C,\ \forall t$$
+- **R2-7 刚体一致变换**：集合施加相同刚体，任意成对距离保持不变。
+- **R2-8 相对姿态保持**：共同旋转 $$R^{(i)}_{t+1}=Q R^{(i)}_t$$，夹角恒定。
 
-### R3 多物体构型推理（M08 + M10 + M12 + C08–C09 + C12）
-- **M08 三对象面积等差**：$$\text{area}_3=2\text{area}_2-\text{area}_1$$
-- **M10 排序模式循环**：$$\text{ord}_x(S_1),\text{ord}_x(S_2),\text{ord}_x(S_3)\ \text{按固定置换}$$
-- **M12 距离集合等比**：$$v_{t+1}=k v_t,\ v_t=[\text{dist}(1,2),\text{dist}(1,3),\text{dist}(2,3)]$$
-- **C08 对称+刚体**：$\text{sym}(S_2)=1,\ X_3=Q X_2+t$
-- **C09 组间质心距离等差**：$$u_t=\|\text{cent}(S_a)-\text{cent}(S_b)\|,\ u_3=2u_2-u_1$$
-- **C12 面积-边长守恒**：$$\text{area}(1,2,3)\cdot \text{dist}(1,2)=C$$
+### R3 多物体构型推理（R3-1–R3-6）
+- **R3-1 三对象面积等差**：$$\text{area}_3=2\text{area}_2-\text{area}_1$$
+- **R3-2 排序模式循环**：$$\text{ord}_x(S_1),\text{ord}_x(S_2),\text{ord}_x(S_3)\ \text{按固定置换}$$
+- **R3-3 距离集合等比**：$$v_{t+1}=k v_t,\ v_t=[\text{dist}(1,2),\text{dist}(1,3),\text{dist}(2,3)]$$
+- **R3-4 对称+刚体**：$\text{sym}(S_2)=1,\ X_3=Q X_2+t$
+- **R3-5 组间质心距离等差**：$$u_t=\|\text{cent}(S_a)-\text{cent}(S_b)\|,\ u_3=2u_2-u_1$$
+- **R3-6 面积-边长守恒**：$$\text{area}(1,2,3)\cdot \text{dist}(1,2)=C$$
 
 
 

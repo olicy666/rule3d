@@ -12,9 +12,9 @@
   "cand2_reason": "符合原规则的正确延续",
   "cand3_reason": "平移参与对象，派生 sym(S) 不再符合 discrete+rigid 模式变换",
   "cand4_reason": "平移参与对象，派生 sym(S) 不再符合 discrete+rigid 模式变换",
-  "rule_id": "C08",
+  "rule_id": "R3-4",
   "rule_meta": {
-    "rule_id": "C08",
+    "rule_id": "R3-4",
     "rule_group": "R3",
     "difficulty": "complex",
     "K_R": 3,

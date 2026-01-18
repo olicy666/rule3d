@@ -12,9 +12,9 @@
   "cand2_reason": "平移参与对象，派生 dist(0,1)-dist(1,2) 不再符合 conservation 模式变换",
   "cand3_reason": "平移参与对象，派生 dist(0,1)-dist(1,2) 不再符合 conservation 模式变换",
   "cand4_reason": "符合原规则的正确延续",
-  "rule_id": "M09",
+  "rule_id": "R2-6",
   "rule_meta": {
-    "rule_id": "M09",
+    "rule_id": "R2-6",
     "rule_group": "R2",
     "difficulty": "medium",
     "K_R": 3,

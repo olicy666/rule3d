@@ -66,9 +66,9 @@ class M01DistanceArithmetic(Rule):
 
 
 @dataclass
-class M02DistanceGeometric(Rule):
+class R2_1DistanceGeometric(Rule):
     def __init__(self) -> None:
-        super().__init__("M02", RuleDifficulty.MEDIUM, "成对距离等比", "dist(i,j) 等比")
+        super().__init__("R2-1", RuleDifficulty.MEDIUM, "成对距离等比", "dist(i,j) 等比")
 
     def sample_params(self, rng) -> Dict:
         k = float(rng.uniform(1.15, 1.6) if rng.random() < 0.5 else rng.uniform(0.65, 0.9))
@@ -132,9 +132,9 @@ class M02DistanceGeometric(Rule):
 
 
 @dataclass
-class M03DirectionLocked(Rule):
+class R2_2DirectionLocked(Rule):
     def __init__(self) -> None:
-        super().__init__("M03", RuleDifficulty.MEDIUM, "方向保持距离变化", "dir 恒定, dist 线性")
+        super().__init__("R2-2", RuleDifficulty.MEDIUM, "方向保持距离变化", "dir 恒定, dist 线性")
 
     def sample_params(self, rng) -> Dict:
         step = float(rng.uniform(0.1, 0.3)) * (1 if rng.random() < 0.5 else -1)
@@ -208,9 +208,9 @@ class M03DirectionLocked(Rule):
 
 
 @dataclass
-class M04DirectionRotate(Rule):
+class R2_3DirectionRotate(Rule):
     def __init__(self) -> None:
-        super().__init__("M04", RuleDifficulty.MEDIUM, "方向旋转等差角", "dir 旋转, dist 保持")
+        super().__init__("R2-3", RuleDifficulty.MEDIUM, "方向旋转等差角", "dir 旋转, dist 保持")
 
     def sample_params(self, rng) -> Dict:
         theta = float(rng.uniform(math.pi / 12, math.pi / 6))
@@ -352,9 +352,9 @@ class M05TouchSequence(Rule):
 
 
 @dataclass
-class M06ContainRatioArithmetic(Rule):
+class R2_4ContainRatioArithmetic(Rule):
     def __init__(self) -> None:
-        super().__init__("M06", RuleDifficulty.MEDIUM, "包含比例等差", "内含比例按等差变化")
+        super().__init__("R2-4", RuleDifficulty.MEDIUM, "包含比例等差", "内含比例按等差变化")
 
     def sample_params(self, rng) -> Dict:
         for _ in range(20):
@@ -465,9 +465,9 @@ class M06ContainRatioArithmetic(Rule):
 
 
 @dataclass
-class M07AngleArithmetic(Rule):
+class R2_5AngleArithmetic(Rule):
     def __init__(self) -> None:
-        super().__init__("M07", RuleDifficulty.MEDIUM, "夹角等差", "轴夹角按等差变化")
+        super().__init__("R2-5", RuleDifficulty.MEDIUM, "夹角等差", "轴夹角按等差变化")
 
     def sample_params(self, rng) -> Dict:
         base_angle = float(rng.uniform(math.pi / 12, math.pi / 6))
@@ -494,9 +494,9 @@ class M07AngleArithmetic(Rule):
 
 
 @dataclass
-class M08AreaArithmetic(Rule):
+class R3_1AreaArithmetic(Rule):
     def __init__(self) -> None:
-        super().__init__("M08", RuleDifficulty.MEDIUM, "三对象面积等差", "三点面积等差变化")
+        super().__init__("R3-1", RuleDifficulty.MEDIUM, "三对象面积等差", "三点面积等差变化")
 
     def sample_params(self, rng) -> Dict:
         delta_ratio = float(rng.uniform(0.15, 0.35)) * (1 if rng.random() < 0.5 else -1)
@@ -544,9 +544,9 @@ class M08AreaArithmetic(Rule):
 
 
 @dataclass
-class M09DistanceDifferenceConserved(Rule):
+class R2_6DistanceDifferenceConserved(Rule):
     def __init__(self) -> None:
-        super().__init__("M09", RuleDifficulty.MEDIUM, "距离差分守恒", "两对距离差保持常数")
+        super().__init__("R2-6", RuleDifficulty.MEDIUM, "距离差分守恒", "两对距离差保持常数")
 
     def sample_params(self, rng) -> Dict:
         constant = float(rng.uniform(0.2, 0.5))
@@ -592,9 +592,9 @@ class M09DistanceDifferenceConserved(Rule):
 
 
 @dataclass
-class M10OrderingCycle(Rule):
+class R3_2OrderingCycle(Rule):
     def __init__(self) -> None:
-        super().__init__("M10", RuleDifficulty.MEDIUM, "排序模式循环", "沿 x 轴顺序循环")
+        super().__init__("R3-2", RuleDifficulty.MEDIUM, "排序模式循环", "沿 x 轴顺序循环")
 
     def sample_params(self, rng) -> Dict:
         return {}
@@ -678,9 +678,9 @@ class M11CentroidArithmetic(Rule):
 
 
 @dataclass
-class M12DistanceVectorGeometric(Rule):
+class R3_3DistanceVectorGeometric(Rule):
     def __init__(self) -> None:
-        super().__init__("M12", RuleDifficulty.MEDIUM, "距离集合等比缩放", "三对距离成等比")
+        super().__init__("R3-3", RuleDifficulty.MEDIUM, "距离集合等比缩放", "三对距离成等比")
 
     def sample_params(self, rng) -> Dict:
         k = float(rng.uniform(1.5, 2.0))
@@ -763,9 +763,9 @@ class M13SymmetrySwitch(Rule):
 
 
 @dataclass
-class M14DualSizeConservation(Rule):
+class R1_10DualSizeConservation(Rule):
     def __init__(self) -> None:
-        super().__init__("M14", RuleDifficulty.MEDIUM, "双对象属性联动", "size 和保持守恒")
+        super().__init__("R1-10", RuleDifficulty.MEDIUM, "双对象属性联动", "size 和保持守恒")
 
     def sample_params(self, rng) -> Dict:
         delta_ratio = float(rng.uniform(0.4, 0.8))
@@ -810,14 +810,14 @@ class M14DualSizeConservation(Rule):
 
 def build_medium_rules() -> List[Rule]:
     return [
-        M02DistanceGeometric(),
-        M03DirectionLocked(),
-        M04DirectionRotate(),
-        M06ContainRatioArithmetic(),
-        M07AngleArithmetic(),
-        M08AreaArithmetic(),
-        M09DistanceDifferenceConserved(),
-        M10OrderingCycle(),
-        M12DistanceVectorGeometric(),
-        M14DualSizeConservation(),
+        R2_1DistanceGeometric(),
+        R2_2DirectionLocked(),
+        R2_3DirectionRotate(),
+        R2_4ContainRatioArithmetic(),
+        R2_5AngleArithmetic(),
+        R3_1AreaArithmetic(),
+        R2_6DistanceDifferenceConserved(),
+        R3_2OrderingCycle(),
+        R3_3DistanceVectorGeometric(),
+        R1_10DualSizeConservation(),
     ]

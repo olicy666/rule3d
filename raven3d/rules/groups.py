@@ -4,35 +4,35 @@ from typing import Dict, Iterable, List, Set
 
 # 大类划分（R4 已移除）
 R1: Set[str] = {
-    "S02",
-    "S04",
-    "S05",
-    "S06",
-    "S07",
-    "S09",
-    "S12",
-    "S13",
-    "S14",
-    "M14",
-    "C01",
+    "R1-1",
+    "R1-2",
+    "R1-3",
+    "R1-4",
+    "R1-5",
+    "R1-6",
+    "R1-7",
+    "R1-8",
+    "R1-9",
+    "R1-10",
+    "R1-11",
 }
 R2: Set[str] = {
-    "M02",
-    "M03",
-    "M04",
-    "M06",
-    "M07",
-    "M09",
-    "C10",
-    "C11",
+    "R2-1",
+    "R2-2",
+    "R2-3",
+    "R2-4",
+    "R2-5",
+    "R2-6",
+    "R2-7",
+    "R2-8",
 }
 R3: Set[str] = {
-    "M08",
-    "M10",
-    "M12",
-    "C08",
-    "C09",
-    "C12",
+    "R3-1",
+    "R3-2",
+    "R3-3",
+    "R3-4",
+    "R3-5",
+    "R3-6",
 }
 
 # 子类划分
@@ -51,8 +51,16 @@ MODE_TO_RULES: Dict[str, Set[str]] = {
 
 
 def list_all_rules() -> List[str]:
-    """Return all supported rule IDs sorted alphabetically."""
-    return sorted(ALL_RULES)
+    """Return all supported rule IDs sorted by group and index."""
+    def key(rule_id: str) -> tuple[int, int, str]:
+        if rule_id.startswith("R") and "-" in rule_id:
+            group_part, _, idx_part = rule_id.partition("-")
+            group_num = group_part[1:]
+            if group_num.isdigit() and idx_part.isdigit():
+                return (int(group_num), int(idx_part), rule_id)
+        return (99, 999, rule_id)
+
+    return sorted(ALL_RULES, key=key)
 
 
 def list_available_modes() -> List[str]:

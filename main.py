@@ -28,7 +28,7 @@ def parse_args() -> argparse.Namespace:
         "--rules",
         type=str,
         default=None,
-        help="Comma-separated rule IDs (e.g., S01,M04,C02). When provided, overrides --mode.",
+        help="Comma-separated rule IDs (e.g., R1-1,R2-3,R3-2). When provided, overrides --mode.",
     )
     return parser.parse_args()
 

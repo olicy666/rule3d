@@ -25,16 +25,13 @@ POINTS_PER_CLOUD = 16384
 
 
 def sort_rule_ids(rule_ids: List[str]) -> List[str]:
-    prefix_order = {"S": 0, "M": 1, "C": 2}
-
     def key(rule_id: str) -> tuple:
-        prefix = rule_id[:1]
-        suffix = rule_id[1:]
-        try:
-            number = int(suffix)
-        except ValueError:
-            number = 999
-        return (prefix_order.get(prefix, 99), number, rule_id)
+        if rule_id.startswith("R") and "-" in rule_id:
+            group_part, _, idx_part = rule_id.partition("-")
+            group_num = group_part[1:]
+            if group_num.isdigit() and idx_part.isdigit():
+                return (int(group_num), int(idx_part), rule_id)
+        return (99, 999, rule_id)
 
     return sorted(rule_ids, key=key)
 
@@ -203,6 +200,8 @@ def init_state() -> None:
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
+    if RULE_IDS and st.session_state.get("mode") not in RULE_IDS:
+        st.session_state["mode"] = RULE_IDS[0]
 
 
 def reset_exam_state() -> None:

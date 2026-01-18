@@ -30,9 +30,9 @@ def _unit_vector(rng: np.random.Generator) -> np.ndarray:
 
 
 @dataclass
-class C01ScaleRotateCoupled(Rule):
+class R1_11ScaleRotateCoupled(Rule):
     def __init__(self) -> None:
-        super().__init__("C01", RuleDifficulty.COMPLEX, "尺度等比+旋转等差", "scale 与 rotation 复合")
+        super().__init__("R1-11", RuleDifficulty.COMPLEX, "尺度等比+旋转等差", "scale 与 rotation 复合")
 
     def sample_params(self, rng) -> Dict:
         k = float(rng.uniform(1.15, 1.5))
@@ -134,9 +134,9 @@ class C03ConditionalShapeScale(Rule):
 
 
 @dataclass
-class C08SymmetryRigid(Rule):
+class R3_4SymmetryRigid(Rule):
     def __init__(self) -> None:
-        super().__init__("C08", RuleDifficulty.COMPLEX, "对称+刚体", "第二帧对称，第三帧刚体变换")
+        super().__init__("R3-4", RuleDifficulty.COMPLEX, "对称+刚体", "第二帧对称，第三帧刚体变换")
 
     def sample_params(self, rng) -> Dict:
         theta = float(rng.uniform(math.pi / 12, math.pi / 8))
@@ -188,9 +188,9 @@ class C08SymmetryRigid(Rule):
 
 
 @dataclass
-class C09GroupCentroidDistance(Rule):
+class R3_5GroupCentroidDistance(Rule):
     def __init__(self) -> None:
-        super().__init__("C09", RuleDifficulty.COMPLEX, "组间质心距离等差", "两组对象质心距离等差")
+        super().__init__("R3-5", RuleDifficulty.COMPLEX, "组间质心距离等差", "两组对象质心距离等差")
 
     def sample_params(self, rng) -> Dict:
         delta = float(rng.uniform(0.2, 0.4)) * (1 if rng.random() < 0.5 else -1)
@@ -240,9 +240,9 @@ class C09GroupCentroidDistance(Rule):
 
 
 @dataclass
-class C10RigidTransform(Rule):
+class R2_7RigidTransform(Rule):
     def __init__(self) -> None:
-        super().__init__("C10", RuleDifficulty.COMPLEX, "刚体一致变换", "整体刚体变换, pairwise dist 不变")
+        super().__init__("R2-7", RuleDifficulty.COMPLEX, "刚体一致变换", "整体刚体变换, pairwise dist 不变")
 
     def sample_params(self, rng) -> Dict:
         theta = float(rng.uniform(math.pi / 18, math.pi / 10))
@@ -292,9 +292,9 @@ class C10RigidTransform(Rule):
 
 
 @dataclass
-class C11RelativeOrientationInvariant(Rule):
+class R2_8RelativeOrientationInvariant(Rule):
     def __init__(self) -> None:
-        super().__init__("C11", RuleDifficulty.COMPLEX, "相对姿态保持", "共同旋转保持夹角不变")
+        super().__init__("R2-8", RuleDifficulty.COMPLEX, "相对姿态保持", "共同旋转保持夹角不变")
 
     def sample_params(self, rng) -> Dict:
         theta = float(rng.uniform(math.pi / 18, math.pi / 10))
@@ -329,9 +329,9 @@ class C11RelativeOrientationInvariant(Rule):
 
 
 @dataclass
-class C12AreaDistanceCoupled(Rule):
+class R3_6AreaDistanceCoupled(Rule):
     def __init__(self) -> None:
-        super().__init__("C12", RuleDifficulty.COMPLEX, "面积-边长守恒", "area 与 dist 乘积守恒")
+        super().__init__("R3-6", RuleDifficulty.COMPLEX, "面积-边长守恒", "area 与 dist 乘积守恒")
 
     def sample_params(self, rng) -> Dict:
         factor = float(rng.uniform(1.2, 1.5))
@@ -386,10 +386,10 @@ class C12AreaDistanceCoupled(Rule):
 
 def build_complex_rules() -> List[Rule]:
     return [
-        C01ScaleRotateCoupled(),
-        C08SymmetryRigid(),
-        C09GroupCentroidDistance(),
-        C10RigidTransform(),
-        C11RelativeOrientationInvariant(),
-        C12AreaDistanceCoupled(),
+        R1_11ScaleRotateCoupled(),
+        R3_4SymmetryRigid(),
+        R3_5GroupCentroidDistance(),
+        R2_7RigidTransform(),
+        R2_8RelativeOrientationInvariant(),
+        R3_6AreaDistanceCoupled(),
     ]

@@ -53,9 +53,9 @@ class S01ScaleGeometric(Rule):
 
 
 @dataclass
-class S02ScaleArithmetic(Rule):
+class R1_1ScaleArithmetic(Rule):
     def __init__(self) -> None:
-        super().__init__("S02", RuleDifficulty.SIMPLE, "等差统一缩放", "size 按等差递进")
+        super().__init__("R1-1", RuleDifficulty.SIMPLE, "等差统一缩放", "size 按等差递进")
 
     def sample_params(self, rng) -> Dict:
         sign = -1.0 if rng.random() < 0.5 else 1.0
@@ -104,7 +104,11 @@ class S02ScaleArithmetic(Rule):
             delta = 0.0
         base_size = float(v2) if v2 is not None else float(v3) - float(delta)
 
-        wrong_deltas = [delta * 2.0, delta * 0.4, -delta * 1.4]
+        wrong_deltas = [
+            delta * float(rng.uniform(1.6, 2.3)),
+            delta * float(rng.uniform(0.3, 0.6)),
+            -delta * float(rng.uniform(1.1, 1.8)),
+        ]
 
         def with_size(target_size: float) -> Scene:
             objs = clone_objects(scene_c.objects)
@@ -154,9 +158,9 @@ class S03SingleAxisGeometric(Rule):
 
 
 @dataclass
-class S04AnisotropicGeometric(Rule):
+class R1_2AnisotropicGeometric(Rule):
     def __init__(self) -> None:
-        super().__init__("S04", RuleDifficulty.SIMPLE, "各向异性等比拉伸", "体积不变的等比拉伸")
+        super().__init__("R1-2", RuleDifficulty.SIMPLE, "各向异性等比拉伸", "体积不变的等比拉伸")
 
     def sample_params(self, rng) -> Dict:
         factor = float(rng.uniform(1.25, 1.7))
@@ -241,9 +245,9 @@ class S04AnisotropicGeometric(Rule):
 
 
 @dataclass
-class S05FixedAxisRotation(Rule):
+class R1_3FixedAxisRotation(Rule):
     def __init__(self) -> None:
-        super().__init__("S05", RuleDifficulty.SIMPLE, "固定轴旋转", "绕固定轴等差旋转")
+        super().__init__("R1-3", RuleDifficulty.SIMPLE, "固定轴旋转", "绕固定轴等差旋转")
 
     def sample_params(self, rng) -> Dict:
         axis_idx = int(rng.integers(0, 3))
@@ -272,9 +276,9 @@ class S05FixedAxisRotation(Rule):
 
 
 @dataclass
-class S06RotationDiscrete(Rule):
+class R1_4RotationDiscrete(Rule):
     def __init__(self) -> None:
-        super().__init__("S06", RuleDifficulty.SIMPLE, "旋转状态离散循环", "0/90/180 度离散旋转")
+        super().__init__("R1-4", RuleDifficulty.SIMPLE, "旋转状态离散循环", "0/90/180 度离散旋转")
 
     def sample_params(self, rng) -> Dict:
         axis_idx = int(rng.integers(0, 3))
@@ -313,9 +317,9 @@ class S06RotationDiscrete(Rule):
 
 
 @dataclass
-class S07TranslationArithmetic(Rule):
+class R1_5TranslationArithmetic(Rule):
     def __init__(self) -> None:
-        super().__init__("S07", RuleDifficulty.SIMPLE, "固定向量平移", "等差平移")
+        super().__init__("R1-5", RuleDifficulty.SIMPLE, "固定向量平移", "等差平移")
 
     def sample_params(self, rng) -> Dict:
         delta = rng.uniform(0.25, 0.5, size=3) * rng.choice([-1, 1], size=3)
@@ -394,9 +398,9 @@ class S08TranslationDiscrete(Rule):
 
 
 @dataclass
-class S09DensityArithmetic(Rule):
+class R1_6DensityArithmetic(Rule):
     def __init__(self) -> None:
-        super().__init__("S09", RuleDifficulty.SIMPLE, "密度等差", "density 按等差变化")
+        super().__init__("R1-6", RuleDifficulty.SIMPLE, "密度等差", "density 按等差变化")
 
     def sample_params(self, rng) -> Dict:
         delta_ratio = float(rng.uniform(0.6, 0.9))
@@ -552,9 +556,9 @@ class S11ShapeABA(Rule):
 
 
 @dataclass
-class S12ShapeChangeFollow(Rule):
+class R1_7ShapeChangeFollow(Rule):
     def __init__(self) -> None:
-        super().__init__("S12", RuleDifficulty.SIMPLE, "形状变化继承", "A->B 变化的位置在 C 继续变化")
+        super().__init__("R1-7", RuleDifficulty.SIMPLE, "形状变化继承", "A->B 变化的位置在 C 继续变化")
 
     def sample_params(self, rng) -> Dict:
         return {}
@@ -637,9 +641,9 @@ class S12ShapeChangeFollow(Rule):
 
 
 @dataclass
-class S13ScaleCentroidCoupled(Rule):
+class R1_8ScaleCentroidCoupled(Rule):
     def __init__(self) -> None:
-        super().__init__("S13", RuleDifficulty.SIMPLE, "尺度-位置联动", "缩放并平移以保持参与集合质心不变")
+        super().__init__("R1-8", RuleDifficulty.SIMPLE, "尺度-位置联动", "缩放并平移以保持参与集合质心不变")
 
     def sample_params(self, rng) -> Dict:
         k = float(rng.uniform(1.2, 1.6))
@@ -681,9 +685,9 @@ class S13ScaleCentroidCoupled(Rule):
 
 
 @dataclass
-class S14Identity(Rule):
+class R1_9Identity(Rule):
     def __init__(self) -> None:
-        super().__init__("S14", RuleDifficulty.SIMPLE, "恒等规则", "A/B/C 完全相同")
+        super().__init__("R1-9", RuleDifficulty.SIMPLE, "恒等规则", "A/B/C 完全相同")
 
     def sample_params(self, rng) -> Dict:
         return {}
@@ -702,13 +706,13 @@ class S14Identity(Rule):
 
 def build_simple_rules() -> List[Rule]:
     return [
-        S02ScaleArithmetic(),
-        S04AnisotropicGeometric(),
-        S05FixedAxisRotation(),
-        S06RotationDiscrete(),
-        S07TranslationArithmetic(),
-        S09DensityArithmetic(),
-        S12ShapeChangeFollow(),
-        S13ScaleCentroidCoupled(),
-        S14Identity(),
+        R1_1ScaleArithmetic(),
+        R1_2AnisotropicGeometric(),
+        R1_3FixedAxisRotation(),
+        R1_4RotationDiscrete(),
+        R1_5TranslationArithmetic(),
+        R1_6DensityArithmetic(),
+        R1_7ShapeChangeFollow(),
+        R1_8ScaleCentroidCoupled(),
+        R1_9Identity(),
     ]

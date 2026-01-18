@@ -12,9 +12,9 @@
   "cand2_reason": "修改尺度，派生 size(O0) 不再满足 arithmetic 模式变换（尺度被缩放）",
   "cand3_reason": "符合原规则的正确延续",
   "cand4_reason": "修改尺度，派生 size(O0) 不再满足 arithmetic 模式变换（尺度被缩放）",
-  "rule_id": "S02",
+  "rule_id": "R1-1",
   "rule_meta": {
-    "rule_id": "S02",
+    "rule_id": "R1-1",
     "rule_group": "R1",
     "difficulty": "simple",
     "K_R": 1,
