@@ -306,10 +306,10 @@ def pl_multi_component(
           }}
 
           pending -= 1;
-          setOverlay(`已加载 ${group.children.length}/${items.length}`);
+          setOverlay("已加载 " + group.children.length + "/" + items.length);
           if (pending === 0 && hasBox) {{
             fitCamera(box);
-            setOverlay(`已加载 ${items.length} 个点云`);
+            setOverlay("已加载 " + items.length + " 个点云");
           }}
         }}, undefined, (err) => {{
           URL.revokeObjectURL(url);
