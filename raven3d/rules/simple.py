@@ -158,9 +158,76 @@ class S03SingleAxisGeometric(Rule):
 
 
 @dataclass
-class R1_2AnisotropicGeometric(Rule):
+class R1_2AxisPermutation(Rule):
     def __init__(self) -> None:
-        super().__init__("R1-2", RuleDifficulty.SIMPLE, "各向异性等比拉伸", "体积不变的等比拉伸")
+        super().__init__("R1-2", RuleDifficulty.SIMPLE, "尺度轴置换循环", "r_x/r_y/r_z 按固定置换循环")
+
+    def sample_params(self, rng) -> Dict:
+        return {"order": [1, 2, 0]}
+
+    def generate_triplet(self, params, rng):
+        objs = init_objects(rng, 1)
+        involved = [0]
+        base = objs[0].copy()
+        base.rotation = np.zeros(3)
+        scale = float(np.mean(base.r))
+        ratios = np.array([0.6, 1.0, 1.45], dtype=float)
+        rng.shuffle(ratios)
+        base.r = ratios * scale
+
+        order = params["order"]
+
+        def apply_perm(obj, perm):
+            new_obj = obj.copy()
+            new_obj.r = new_obj.r[np.array(perm, dtype=int)]
+            return new_obj
+
+        a_objs = [base.copy()]
+        b_objs = [apply_perm(base, order)]
+        c_objs = [apply_perm(b_objs[0], order)]
+        scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
+        v = [o.r.tolist() for o in [a_objs[0], b_objs[0], c_objs[0]]]
+        meta = build_rule_meta(
+            self,
+            "R1",
+            1,
+            involved,
+            ["r"],
+            ["perm(r)"],
+            "permute",
+            {"order": order},
+            v,
+            scenes,
+        )
+        return scenes[0], scenes[1], scenes[2], meta
+
+    def make_distractors(self, scene_c: Scene, rng, meta: Dict) -> Tuple[list[Scene], list[str]]:
+        if not scene_c.objects:
+            return [], []
+
+        def with_perm(order: List[int]) -> Scene:
+            objs = clone_objects(scene_c.objects)
+            r = objs[0].r.copy()
+            objs[0].r = r[np.array(order, dtype=int)]
+            return scene_from_objects(objs)
+
+        distractors = [
+            with_perm([1, 0, 2]),
+            with_perm([0, 2, 1]),
+            with_perm([2, 1, 0]),
+        ]
+        reasons = [
+            "仅交换两个轴",
+            "置换顺序错误",
+            "轴顺序完全反向",
+        ]
+        return distractors, reasons
+
+
+@dataclass
+class R2_9AnisotropicGeometric(Rule):
+    def __init__(self) -> None:
+        super().__init__("R2-9", RuleDifficulty.SIMPLE, "各向异性等比拉伸", "体积不变的等比拉伸")
 
     def sample_params(self, rng) -> Dict:
         factor = float(rng.uniform(1.25, 1.7))
@@ -188,7 +255,7 @@ class R1_2AnisotropicGeometric(Rule):
         v = [aspect_ratio(o) for o in [a_objs[0], b_objs[0], c_objs[0]]]
         meta = build_rule_meta(
             self,
-            "R1",
+            "R2",
             1,
             involved,
             ["r"],
@@ -721,7 +788,8 @@ class R1_8ScaleCentroidCoupled(Rule):
 def build_simple_rules() -> List[Rule]:
     return [
         R1_1ScaleArithmetic(),
-        R1_2AnisotropicGeometric(),
+        R1_2AxisPermutation(),
+        R2_9AnisotropicGeometric(),
         R1_3FixedAxisRotation(),
         R1_4RotationDiscrete(),
         R1_5TranslationArithmetic(),

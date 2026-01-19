@@ -1,6 +1,6 @@
 # Rule3D：基于规则的多几何体点云推理数据集生成器
 
-本项目实现 `program.md` 中的“数学原型”版生成器：每题输出 6 个点云（1/2 为参考帧 A/B，3/4/5/6 为四个候选，其中仅 1 个正确）和 `meta.json`，同时根目录提供所有题目的 `meta.json` 列表。规则总数 30（移除 R4 拓扑类），每帧场景由 2~3 个几何体组成。
+本项目实现 `program.md` 中的“数学原型”版生成器：每题输出 6 个点云（1/2 为参考帧 A/B，3/4/5/6 为四个候选，其中仅 1 个正确）和 `meta.json`，同时根目录提供所有题目的 `meta.json` 列表。规则总数 29（移除 R4 拓扑类），每帧场景由 2~3 个几何体组成。
 
 ## 快速开始
 环境：Python 3.10+，依赖仅 `numpy`。
@@ -55,28 +55,26 @@ output/meta.json  # 所有题目的 meta 列表
 - 刚体/仿射：$$p_{t+1}=Q p_t + t,\quad R_{t+1}=Q R_t$$
 - 联动：多变量守恒/耦合（质心恒定、距离和恒定等）。
 
-## 规则清单（30 条：8 Simple + 16 Medium + 6 Complex）
+## 规则清单（29 条：9 Simple + 14 Medium + 6 Complex）
 所有规则 meta 包含 `rule_id, rule_group(R1/R2/R3), difficulty, K_R, involved_indices, base_attrs_used, derived_funcs, pattern_type, pattern_params, v1/v2/v3`。
 
-### R1 物体属性推理（16 条，缺 R1-9）
+### R1 物体属性推理（14 条）
 - **R1-1 等差统一缩放**：$$\text{size}_2-\text{size}_1=\Delta,\ \text{size}_3=2\text{size}_2-\text{size}_1$$
-- **R1-2 各向异性等比拉伸**：$$r_{t+1}=r_t\odot s,\ s_{axis}=k,\ s_{\text{others}}=\tfrac{1}{\sqrt{k}}\ \Rightarrow\ \text{vol 保持}$$
+- **R1-2 尺度轴置换循环**：$$(r_x,r_y,r_z)\to(r_y,r_z,r_x)\to(r_z,r_x,r_y)$$
 - **R1-3 固定轴旋转**：$$R_{t+1}=R_t\cdot\text{Rot}(\hat{u},\theta)$$
 - **R1-4 旋转离散循环**：$$(R_1,R_2,R_3)=(Q_0,Q_{90},Q_{180})$$
 - **R1-5 固定向量平移**：$$p_{t+1}=p_t+\Delta p$$
 - **R1-6 密度等差**：$$d_2-d_1=\Delta,\ d_3=2d_2-d_1$$
 - **R1-7 形状变化继承**：A→B 哪些位置形状改变，B→C 在相同位置继续改变
 - **R1-8 尺度-位置联动**：$$\text{cent}(S_t)=\text{const},\ r_{t+1}=k r_t,\ p_{t+1}=p_t+\delta p$$
-- **R1-10 双对象守恒**：$$\text{size}(i)_t+\text{size}(j)_t=C,\ \text{size}(i)\ \text{递增},\ \text{size}(j)\ \text{递减}$$
-- **R1-11 复合属性**：$$r_{t+1}=k r_t,\ R_{t+1}=R_t\text{Rot}(\hat{u},\theta)$$
-- **R1-12 属性互换联动**：两物体形状/尺度/姿态互换，下一帧继续互换
-- **R1-13 朝向随位移**：移动方向与主轴一致
-- **R1-14 距离-尺度联动**：远离锚点变大，靠近锚点变小
-- **R1-15 包围盒守恒**：整体 AABB 尺寸不变
-- **R1-16 属性迁移链**：三物体按固定顺序传递形状/尺度/姿态
-- **R1-17 镜像+尺度互补**：镜像位置下尺寸一增一减
+- **R1-9 双对象守恒**：$$\text{size}(i)_t+\text{size}(j)_t=C,\ \text{size}(i)\ \text{递增},\ \text{size}(j)\ \text{递减}$$
+- **R1-10 复合属性**：$$r_{t+1}=k r_t,\ R_{t+1}=R_t\text{Rot}(\hat{u},\theta)$$
+- **R1-11 属性互换联动**：两物体形状/尺度交替互换（先形状后尺度或相反）
+- **R1-12 朝向随位移**：移动方向与主轴一致
+- **R1-13 距离-尺度联动**：远离锚点变大，靠近锚点变小
+- **R1-14 镜像+尺度互补**：镜像位置下尺寸一增一减
 
-### R2 成对空间关系推理（R2-1–R2-8）
+### R2 成对空间关系推理（R2-1–R2-9）
 - **R2-1 成对距离等比**：$$\text{dist}_2=k\text{dist}_1,\ \text{dist}_3=k\text{dist}_2$$
 - **R2-2 方向保持**：$$\text{dir}_1=\text{dir}_2=\text{dir}_3,\ \text{dist}\ \text{线性/等比}$$
 - **R2-3 方向旋转等差角**：$$\angle(\text{dir}_t,\text{dir}_{t+1})=\theta,\ \text{dist}\ \text{恒定}$$
@@ -85,6 +83,7 @@ output/meta.json  # 所有题目的 meta 列表
 - **R2-6 距离差分守恒**：$$\text{dist}(i,j)-\text{dist}(k,l)=C,\ \forall t$$
 - **R2-7 刚体一致变换**：集合施加相同刚体，任意成对距离保持不变。
 - **R2-8 相对姿态保持**：共同旋转 $$R^{(i)}_{t+1}=Q R^{(i)}_t$$，夹角恒定。
+- **R2-9 各向异性等比拉伸**：$$r_{t+1}=r_t\odot s,\ s_{axis}=k,\ s_{\text{others}}=\tfrac{1}{\sqrt{k}}\ \Rightarrow\ \text{vol 保持}$$
 
 ### R3 多物体构型推理（R3-1–R3-6）
 - **R3-1 三对象面积等差**：$$\text{area}_3=2\text{area}_2-\text{area}_1$$
@@ -99,7 +98,7 @@ output/meta.json  # 所有题目的 meta 列表
 ## 目录结构
 - `main.py`：CLI 入口与模式选择
 - `raven3d/scene.py`：`ObjectState`/`Scene` 多物体采样
-- `raven3d/rules/`：30 条规则（按 simple/medium/complex 划分）
+- `raven3d/rules/`：29 条规则（按 simple/medium/complex 划分）
 - `raven3d/dataset.py`：样本生成与 meta 写出
 - `program.md`：实施要求
 

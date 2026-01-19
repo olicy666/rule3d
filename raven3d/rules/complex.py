@@ -31,9 +31,9 @@ def _unit_vector(rng: np.random.Generator) -> np.ndarray:
 
 
 @dataclass
-class R1_11ScaleRotateCoupled(Rule):
+class R1_10ScaleRotateCoupled(Rule):
     def __init__(self) -> None:
-        super().__init__("R1-11", RuleDifficulty.COMPLEX, "尺度等比+旋转等差", "scale 与 rotation 复合")
+        super().__init__("R1-10", RuleDifficulty.COMPLEX, "尺度等比+旋转等差", "scale 与 rotation 复合")
 
     def sample_params(self, rng) -> Dict:
         k = float(rng.uniform(1.15, 1.5))
@@ -386,7 +386,7 @@ class R3_6AreaDistanceCoupled(Rule):
 
 def build_complex_rules() -> List[Rule]:
     return [
-        R1_11ScaleRotateCoupled(),
+        R1_10ScaleRotateCoupled(),
         R3_4SymmetryRigid(),
         R3_5GroupCentroidDistance(),
         R2_7RigidTransform(),
