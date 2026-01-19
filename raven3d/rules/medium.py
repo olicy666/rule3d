@@ -14,6 +14,7 @@ from .utils import (
     apply_scale,
     apply_translation,
     aspect_ratio,
+    axis,
     build_rule_meta,
     centroid,
     clone_objects,
@@ -357,19 +358,19 @@ class R2_4ContainRatioArithmetic(Rule):
         super().__init__("R2-4", RuleDifficulty.MEDIUM, "包含比例等差", "内含比例按等差变化")
 
     def sample_params(self, rng) -> Dict:
-        for _ in range(20):
-            base_ratio = float(rng.uniform(0.25, 0.65))
-            delta = float(rng.uniform(0.1, 0.2)) * (1 if rng.random() < 0.5 else -1)
+        for _ in range(30):
+            base_ratio = float(rng.uniform(0.2, 0.55))
+            delta = float(rng.uniform(0.18, 0.28)) * (1 if rng.random() < 0.5 else -1)
             r2 = base_ratio + delta
             r3 = base_ratio + 2 * delta
-            if 0.1 <= r2 <= 0.9 and 0.1 <= r3 <= 0.9:
+            if 0.12 <= r2 <= 0.85 and 0.12 <= r3 <= 0.85:
                 return {"base_ratio": base_ratio, "delta": delta}
-        return {"base_ratio": 0.6, "delta": -0.1}
+        return {"base_ratio": 0.45, "delta": -0.2}
 
     def generate_triplet(self, params, rng):
         outer = init_objects(rng, 1, m=2)[0]
         inner = init_objects(rng, 1, m=2)[1]
-        outer.r = np.maximum(outer.r, inner.r * 1.8)
+        outer.r = np.maximum(outer.r, inner.r * 2.2)
         involved = [0, 1]
         base_ratio = float(params["base_ratio"])
         delta = float(params["delta"])
@@ -430,15 +431,24 @@ class R2_4ContainRatioArithmetic(Rule):
             o0, o1 = self._place_ratio(o0, o1, ratio, axis_idx, direction)
             return scene_from_objects([o0, o1])
 
+        def break_containment():
+            o0, o1 = outer.copy(), inner.copy()
+            slack = o0.r / 2.0 - o1.r / 2.0
+            axis_idx = int(np.argmax(slack))
+            direction = 1 if rng.random() < 0.5 else -1
+            o1.p = o0.p.copy()
+            o1.p[axis_idx] += direction * (slack[axis_idx] + o1.r[axis_idx] * 0.2)
+            return scene_from_objects([o0, o1])
+
         distractors = [
             build_scene(pick_wrong_ratio(), scale_inner=False, tweak_shape=False, tweak_rot=False),
             build_scene(pick_wrong_ratio(), scale_inner=True, tweak_shape=False, tweak_rot=False),
-            build_scene(pick_wrong_ratio(), scale_inner=True, tweak_shape=True, tweak_rot=True),
+            break_containment(),
         ]
         reasons = [
             "包含比例与等差规律不一致（位置偏移）",
             "缩放内物体导致包含比例偏离等差规律",
-            "形状/旋转变化且包含比例不符合等差规律",
+            "内物体部分露出，违反包含关系",
         ]
         return distractors, reasons
 
@@ -777,13 +787,33 @@ class R1_10DualSizeConservation(Rule):
         involved = [0, 1]
         s0, s1 = size(objs[0]), size(objs[1])
         total = s0 + s1
+        min_ratio = 0.2
+        if min(s0, s1) / total < min_ratio:
+            if s0 < s1:
+                target_small = (min_ratio / (1.0 - min_ratio)) * s1
+                f = (target_small / s0) ** (1 / 3)
+                objs[0] = apply_scale(objs[0], f)
+            else:
+                target_small = (min_ratio / (1.0 - min_ratio)) * s0
+                f = (target_small / s1) ** (1 / 3)
+                objs[1] = apply_scale(objs[1], f)
+            s0, s1 = size(objs[0]), size(objs[1])
+            total = s0 + s1
+
         delta = s0 * params["delta_ratio"]
-        # Keep both steps in bounds: s0 + 2*delta > 0 and s1 - 2*delta > 0.
-        eps = 1e-6
+        min_size = total * min_ratio
+        max_pos = (s1 - min_size) / 2.0
+        max_neg = (min_size - s0) / 2.0  # negative or zero
         if delta >= 0:
-            delta = min(delta, 0.5 * s1 - eps)
+            delta = min(delta, max_pos)
         else:
-            delta = max(delta, -0.5 * s0 + eps)
+            delta = max(delta, max_neg)
+        min_delta_mag = total * 0.08
+        if abs(delta) < min_delta_mag:
+            if max_pos >= abs(max_neg):
+                delta = max_pos
+            else:
+                delta = max_neg
 
         def resize_pair(base0, base1, delta_val):
             target0 = base0 + delta_val
@@ -813,6 +843,552 @@ class R1_10DualSizeConservation(Rule):
         )
         return scenes[0], scenes[1], scenes[2], meta
 
+    def make_distractors(self, scene_c: Scene, rng, meta: Dict) -> Tuple[list[Scene], list[str]]:
+        if len(scene_c.objects) < 2:
+            return [], []
+        v = meta.get("v", {})
+        v1 = v.get("v1")
+        v2 = v.get("v2")
+        v3 = v.get("v3")
+        if not (v1 and v2 and v3):
+            return [], []
+        sizes_a = [float(v1[0]), float(v1[1])]
+        sizes_b = [float(v2[0]), float(v2[1])]
+        sizes_c = [float(v3[0]), float(v3[1])]
+        total = float(sum(sizes_a))
+        min_size = total * 0.2
+
+        def apply_sizes(target_sizes: List[float]) -> Scene:
+            objs = clone_objects(scene_c.objects)
+            for i in range(2):
+                cur = size(objs[i])
+                target = max(float(target_sizes[i]), min_size)
+                if cur > 1e-6:
+                    f = (target / cur) ** (1 / 3)
+                    objs[i] = apply_scale(objs[i], f)
+            return scene_from_objects(objs)
+
+        swap_sizes = [sizes_c[1], sizes_c[0]]
+        if abs(swap_sizes[0] - swap_sizes[1]) < total * 0.15:
+            swap_sizes = [sizes_c[0] * 1.3, sizes_c[1] * 0.7]
+        both_up = [sizes_c[0] * 1.35, sizes_c[1] * 1.35]
+
+        distractors = [
+            apply_sizes(sizes_b),
+            apply_sizes(swap_sizes),
+            apply_sizes(both_up),
+        ]
+        reasons = [
+            "未按联动延续（停留在前一步）",
+            "双对象比例关系错误",
+            "双对象同时变大，守恒被破坏",
+        ]
+        return distractors, reasons
+
+
+@dataclass
+class R1_12AttributeSwap(Rule):
+    def __init__(self) -> None:
+        super().__init__("R1-12", RuleDifficulty.MEDIUM, "属性互换联动", "形状/尺度/姿态在两物体间互换")
+
+    def sample_params(self, rng) -> Dict:
+        return {}
+
+    def generate_triplet(self, params, rng):
+        objs = init_objects(rng, 2, m=2)
+        involved = [0, 1]
+        base_offset = float(rng.uniform(0.35, 0.6))
+        base_y = float(rng.uniform(-0.2, 0.2))
+        base_z = float(rng.uniform(-0.2, 0.2))
+        objs[0].p = np.array([-base_offset, base_y, base_z])
+        objs[1].p = np.array([base_offset, -base_y, -base_z])
+        if objs[0].shape == objs[1].shape:
+            options = [s for s in SHAPES if s != objs[0].shape]
+            objs[1].shape = str(rng.choice(options))
+        if abs(size(objs[0]) - size(objs[1])) < 0.12 * size(objs[0]):
+            objs[1] = apply_scale(objs[1], float(rng.uniform(1.25, 1.55)))
+
+        def ensure_aniso(obj):
+            new_obj = obj.copy()
+            r = new_obj.r.copy()
+            if r.max() / (r.min() + 1e-6) < 1.15:
+                r[0] *= 1.4
+            new_obj.r = r
+            return new_obj
+
+        objs = [ensure_aniso(o) for o in objs]
+        if np.linalg.norm(objs[0].rotation - objs[1].rotation) < 0.2:
+            objs[1] = apply_rotation(objs[1], rng.uniform(0.3, 0.6, size=3))
+
+        def swap_attrs(src):
+            swapped = clone_objects(src)
+            swapped[0].shape, swapped[1].shape = swapped[1].shape, swapped[0].shape
+            swapped[0].r, swapped[1].r = swapped[1].r.copy(), swapped[0].r.copy()
+            swapped[0].rotation, swapped[1].rotation = swapped[1].rotation.copy(), swapped[0].rotation.copy()
+            return swapped
+
+        a_objs = clone_objects(objs)
+        b_objs = swap_attrs(a_objs)
+        c_objs = swap_attrs(b_objs)
+        scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
+        v = [
+            [a_objs[0].shape, a_objs[1].shape],
+            [b_objs[0].shape, b_objs[1].shape],
+            [c_objs[0].shape, c_objs[1].shape],
+        ]
+        meta = build_rule_meta(
+            self,
+            "R1",
+            2,
+            involved,
+            ["s", "r", "R"],
+            ["swap(O0,O1)"],
+            "swap",
+            {},
+            v,
+            scenes,
+        )
+        return scenes[0], scenes[1], scenes[2], meta
+
+    def make_distractors(self, scene_c: Scene, rng, meta: Dict) -> Tuple[list[Scene], list[str]]:
+        if len(scene_c.objects) < 2:
+            return [], []
+        objs = clone_objects(scene_c.objects)
+        swap_shape = clone_objects(objs)
+        swap_shape[0].shape, swap_shape[1].shape = swap_shape[1].shape, swap_shape[0].shape
+
+        swap_scale = clone_objects(objs)
+        swap_scale[0].r, swap_scale[1].r = swap_scale[1].r.copy(), swap_scale[0].r.copy()
+
+        swap_rot = clone_objects(objs)
+        swap_rot[0].rotation, swap_rot[1].rotation = swap_rot[1].rotation.copy(), swap_rot[0].rotation.copy()
+
+        distractors = [scene_from_objects(swap_shape), scene_from_objects(swap_scale), scene_from_objects(swap_rot)]
+        reasons = ["仅互换形状", "仅互换尺度", "仅互换姿态"]
+        return distractors, reasons
+
+
+@dataclass
+class R1_13OrientationFollowMotion(Rule):
+    def __init__(self) -> None:
+        super().__init__("R1-13", RuleDifficulty.MEDIUM, "朝向随位移", "移动方向与主轴一致")
+
+    def sample_params(self, rng) -> Dict:
+        step = float(rng.uniform(0.25, 0.4))
+        return {"step": step}
+
+    def generate_triplet(self, params, rng):
+        obj = init_objects(rng, 1, m=2)[0]
+        involved = [0]
+        r = obj.r.copy()
+        if r.max() / (r.min() + 1e-6) < 1.2:
+            r[0] *= 1.45
+            obj = obj.copy()
+            obj.r = r
+        move_dir = axis(obj, 0)
+        step = params["step"]
+        a_objs = [obj.copy()]
+        b_objs = [apply_translation(a_objs[0], move_dir * step)]
+        c_objs = [apply_translation(b_objs[0], move_dir * step)]
+        scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
+        v = [move_dir.tolist(), move_dir.tolist(), move_dir.tolist()]
+        meta = build_rule_meta(
+            self,
+            "R1",
+            1,
+            involved,
+            ["p", "R"],
+            ["axis(O0)", "dir"],
+            "coupled",
+            {"step": step},
+            v,
+            scenes,
+        )
+        return scenes[0], scenes[1], scenes[2], meta
+
+    def make_distractors(self, scene_c: Scene, rng, meta: Dict) -> Tuple[list[Scene], list[str]]:
+        if not scene_c.objects:
+            return [], []
+        step = float(meta.get("pattern_params", {}).get("step", 0.3))
+        base = scene_c.objects[0]
+        axis0 = axis(base, 0)
+        axis1 = axis(base, 1)
+
+        wrong_axis = [apply_translation(base, axis1 * step)]
+        back_step = [apply_translation(base, -axis0 * step)]
+        wrong_rot = [apply_rotation(base, rng.uniform(0.4, 0.7, size=3))]
+
+        distractors = [
+            scene_from_objects(wrong_axis),
+            scene_from_objects(back_step),
+            scene_from_objects(wrong_rot),
+        ]
+        reasons = ["位移方向偏离主轴", "位移方向反向", "姿态被错误旋转"]
+        return distractors, reasons
+
+
+@dataclass
+class R1_14DistanceSizeCoupled(Rule):
+    def __init__(self) -> None:
+        super().__init__("R1-14", RuleDifficulty.MEDIUM, "距离-尺度联动", "远离锚点则变大，靠近则变小")
+
+    def sample_params(self, rng) -> Dict:
+        delta = float(rng.uniform(0.12, 0.2))
+        scale_up = float(rng.uniform(1.2, 1.4))
+        scale_down = 1.0 / scale_up
+        flip = rng.random() < 0.5
+        return {"delta": delta, "scale_up": scale_up, "scale_down": scale_down, "flip": flip}
+
+    def generate_triplet(self, params, rng):
+        objs = init_objects(rng, 2, m=2)
+        involved = [0, 1]
+        delta = params["delta"]
+        scale_up = params["scale_up"]
+        scale_down = params["scale_down"]
+        flip = params["flip"]
+
+        d0 = float(rng.uniform(0.6, 0.8))
+        d1 = float(rng.uniform(0.6, 0.8))
+        objs[0].p = np.array([d0, 0.0, 0.0])
+        objs[1].p = np.array([-d1, 0.0, 0.0])
+
+        signs = [1.0, -1.0]
+        if flip:
+            signs = [-1.0, 1.0]
+
+        def step_objs(src):
+            stepped = []
+            for obj, sign in zip(src, signs):
+                direction_vec = obj.p / (np.linalg.norm(obj.p) + 1e-6)
+                moved = apply_translation(obj, direction_vec * delta * sign)
+                factor = scale_up if sign > 0 else scale_down
+                moved = apply_scale(moved, factor)
+                stepped.append(moved)
+            return stepped
+
+        a_objs = clone_objects(objs)
+        b_objs = step_objs(a_objs)
+        c_objs = step_objs(b_objs)
+        scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
+
+        def dist_size(objects):
+            return [float(np.linalg.norm(objects[0].p)), size(objects[0]), float(np.linalg.norm(objects[1].p)), size(objects[1])]
+
+        v = [dist_size(s.objects) for s in scenes]
+        meta = build_rule_meta(
+            self,
+            "R1",
+            2,
+            involved,
+            ["p", "r"],
+            ["dist(Oi,0)", "size(Oi)"],
+            "coupled",
+            {"delta": delta, "signs": signs},
+            v,
+            scenes,
+        )
+        return scenes[0], scenes[1], scenes[2], meta
+
+    def make_distractors(self, scene_c: Scene, rng, meta: Dict) -> Tuple[list[Scene], list[str]]:
+        if len(scene_c.objects) < 2:
+            return [], []
+        objs = clone_objects(scene_c.objects)
+        swap_sizes = clone_objects(objs)
+        swap_sizes[0].r, swap_sizes[1].r = swap_sizes[1].r.copy(), swap_sizes[0].r.copy()
+
+        wrong_scale = clone_objects(objs)
+        wrong_scale[0] = apply_scale(wrong_scale[0], 0.75)
+
+        wrong_move = clone_objects(objs)
+        delta = float(meta.get("pattern_params", {}).get("delta", 0.15))
+        direction_vec = wrong_move[0].p / (np.linalg.norm(wrong_move[0].p) + 1e-6)
+        wrong_move[0] = apply_translation(wrong_move[0], -direction_vec * delta)
+
+        distractors = [
+            scene_from_objects(swap_sizes),
+            scene_from_objects(wrong_scale),
+            scene_from_objects(wrong_move),
+        ]
+        reasons = ["尺度与距离对应关系被打乱", "尺度变化方向错误", "位置变化方向错误"]
+        return distractors, reasons
+
+
+@dataclass
+class R1_15BoundingBoxConserved(Rule):
+    def __init__(self) -> None:
+        super().__init__("R1-15", RuleDifficulty.MEDIUM, "包围盒守恒", "整体 AABB 尺寸保持不变")
+
+    def sample_params(self, rng) -> Dict:
+        k = float(rng.uniform(1.15, 1.35))
+        return {"k": k}
+
+    def generate_triplet(self, params, rng):
+        objs = init_objects(rng, 2, m=2)
+        involved = [0, 1]
+        k = params["k"]
+
+        left = objs[0].copy()
+        right = objs[1].copy()
+        left.r[0] = float(rng.uniform(0.25, 0.35))
+        right.r[0] = float(rng.uniform(0.25, 0.35))
+        left.p = np.array([-0.6, 0.0, 0.0])
+        right.p = np.array([0.6, 0.0, 0.0])
+        min_x = float(left.p[0] - left.r[0] / 2.0)
+        max_x = float(right.p[0] + right.r[0] / 2.0)
+
+        def scale_keep_bounds(src):
+            l = apply_scale(src[0], np.array([k, 1.0, 1.0]))
+            r = apply_scale(src[1], np.array([k, 1.0, 1.0]))
+            l.p = l.p.copy()
+            r.p = r.p.copy()
+            l.p[0] = min_x + l.r[0] / 2.0
+            r.p[0] = max_x - r.r[0] / 2.0
+            return [l, r]
+
+        a_objs = [left, right]
+        b_objs = scale_keep_bounds(a_objs)
+        c_objs = scale_keep_bounds(b_objs)
+        scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
+        v = [[max_x - min_x], [max_x - min_x], [max_x - min_x]]
+        meta = build_rule_meta(
+            self,
+            "R1",
+            2,
+            involved,
+            ["p", "r"],
+            ["AABB(S)"],
+            "conserved",
+            {"min_x": min_x, "max_x": max_x},
+            v,
+            scenes,
+        )
+        return scenes[0], scenes[1], scenes[2], meta
+
+    def make_distractors(self, scene_c: Scene, rng, meta: Dict) -> Tuple[list[Scene], list[str]]:
+        if len(scene_c.objects) < 2:
+            return [], []
+        objs = clone_objects(scene_c.objects)
+        wrong_scale = clone_objects(objs)
+        wrong_scale[0] = apply_scale(wrong_scale[0], np.array([1.2, 1.0, 1.0]))
+        wrong_scale[1] = apply_scale(wrong_scale[1], np.array([1.2, 1.0, 1.0]))
+
+        wrong_pos = clone_objects(objs)
+        wrong_pos[0] = apply_translation(wrong_pos[0], np.array([-0.1, 0.0, 0.0]))
+        wrong_pos[1] = apply_translation(wrong_pos[1], np.array([0.1, 0.0, 0.0]))
+
+        wrong_axes = clone_objects(objs)
+        wrong_axes[0] = apply_scale(wrong_axes[0], np.array([1.0, 1.25, 1.25]))
+        wrong_axes[1] = apply_scale(wrong_axes[1], np.array([1.0, 1.25, 1.25]))
+
+        distractors = [
+            scene_from_objects(wrong_scale),
+            scene_from_objects(wrong_pos),
+            scene_from_objects(wrong_axes),
+        ]
+        reasons = ["包围盒尺寸增大", "包围盒尺寸被拉宽", "其他轴尺寸被破坏"]
+        return distractors, reasons
+
+
+@dataclass
+class R1_16AttributeShiftChain(Rule):
+    def __init__(self) -> None:
+        super().__init__("R1-16", RuleDifficulty.MEDIUM, "属性迁移链", "三物体按固定顺序传递属性")
+
+    def sample_params(self, rng) -> Dict:
+        return {}
+
+    def generate_triplet(self, params, rng):
+        objs = init_objects(rng, 3, m=3)
+        involved = [0, 1, 2]
+        positions = [
+            np.array([-0.5, 0.0, 0.0]),
+            np.array([0.0, 0.45, 0.0]),
+            np.array([0.55, -0.2, 0.0]),
+        ]
+        for obj, pos in zip(objs, positions):
+            obj.p = pos
+        shapes = rng.choice(SHAPES, size=3, replace=False).tolist()
+        for obj, shape in zip(objs, shapes):
+            obj.shape = shape
+        scales = [0.85, 1.0, 1.25]
+        for idx, factor in enumerate(scales):
+            objs[idx] = apply_scale(objs[idx], factor)
+        objs[0] = apply_rotation(objs[0], np.array([0.3, 0.1, -0.2]))
+        objs[1] = apply_rotation(objs[1], np.array([-0.2, 0.25, 0.15]))
+        objs[2] = apply_rotation(objs[2], np.array([0.15, -0.25, 0.2]))
+
+        def shift_attrs(src, offset: int) -> List:
+            shifted = clone_objects(src)
+            for i in range(3):
+                donor = src[(i - offset) % 3]
+                shifted[i].shape = donor.shape
+                shifted[i].r = donor.r.copy()
+                shifted[i].rotation = donor.rotation.copy()
+            return shifted
+
+        a_objs = clone_objects(objs)
+        b_objs = shift_attrs(a_objs, 1)
+        c_objs = shift_attrs(b_objs, 1)
+        scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
+        v = [
+            [a_objs[0].shape, a_objs[1].shape, a_objs[2].shape],
+            [b_objs[0].shape, b_objs[1].shape, b_objs[2].shape],
+            [c_objs[0].shape, c_objs[1].shape, c_objs[2].shape],
+        ]
+        meta = build_rule_meta(
+            self,
+            "R1",
+            3,
+            involved,
+            ["s", "r", "R"],
+            ["permute(O)"],
+            "cycle",
+            {"order": [0, 1, 2]},
+            v,
+            scenes,
+        )
+        return scenes[0], scenes[1], scenes[2], meta
+
+    def make_distractors(self, scene_c: Scene, rng, meta: Dict) -> Tuple[list[Scene], list[str]]:
+        if len(scene_c.objects) < 3:
+            return [], []
+        objs = clone_objects(scene_c.objects)
+        swap_two = clone_objects(objs)
+        swap_two[0].shape, swap_two[1].shape = swap_two[1].shape, swap_two[0].shape
+        swap_two[0].r, swap_two[1].r = swap_two[1].r.copy(), swap_two[0].r.copy()
+        swap_two[0].rotation, swap_two[1].rotation = swap_two[1].rotation.copy(), swap_two[0].rotation.copy()
+
+        reverse_shift = clone_objects(objs)
+        reverse_shift[0].shape, reverse_shift[2].shape = reverse_shift[2].shape, reverse_shift[0].shape
+        reverse_shift[0].r, reverse_shift[2].r = reverse_shift[2].r.copy(), reverse_shift[0].r.copy()
+        reverse_shift[0].rotation, reverse_shift[2].rotation = (
+            reverse_shift[2].rotation.copy(),
+            reverse_shift[0].rotation.copy(),
+        )
+
+        shape_only = clone_objects(objs)
+        shape_only[0].shape, shape_only[1].shape, shape_only[2].shape = (
+            shape_only[1].shape,
+            shape_only[2].shape,
+            shape_only[0].shape,
+        )
+
+        distractors = [
+            scene_from_objects(swap_two),
+            scene_from_objects(reverse_shift),
+            scene_from_objects(shape_only),
+        ]
+        reasons = ["只交换了部分对象", "迁移方向错误", "仅形状迁移"]
+        return distractors, reasons
+
+
+@dataclass
+class R1_17MirrorSizeComplement(Rule):
+    def __init__(self) -> None:
+        super().__init__("R1-17", RuleDifficulty.MEDIUM, "镜像+尺度互补", "镜像位置下尺寸一增一减")
+
+    def sample_params(self, rng) -> Dict:
+        delta_ratio = float(rng.uniform(0.3, 0.6))
+        sign = 1 if rng.random() < 0.5 else -1
+        return {"delta_ratio": delta_ratio * sign}
+
+    def generate_triplet(self, params, rng):
+        objs = init_objects(rng, 2, m=2)
+        involved = [0, 1]
+        base_offset = float(rng.uniform(0.35, 0.55))
+        base_y = float(rng.uniform(-0.2, 0.2))
+        base_z = float(rng.uniform(-0.2, 0.2))
+        shape = str(rng.choice(SHAPES))
+        rot = rng.uniform(-0.6, 0.6, size=3)
+
+        left = objs[0].copy()
+        right = objs[1].copy()
+        left.shape = shape
+        right.shape = shape
+        left.p = np.array([-base_offset, base_y, base_z])
+        right.p = np.array([base_offset, base_y, base_z])
+        left.rotation = rot
+        right.rotation = rot * np.array([1.0, -1.0, -1.0])
+
+        s0, s1 = size(left), size(right)
+        total = s0 + s1
+        min_ratio = 0.2
+        if min(s0, s1) / total < min_ratio:
+            if s0 < s1:
+                target_small = (min_ratio / (1.0 - min_ratio)) * s1
+                f = (target_small / s0) ** (1 / 3)
+                left = apply_scale(left, f)
+            else:
+                target_small = (min_ratio / (1.0 - min_ratio)) * s0
+                f = (target_small / s1) ** (1 / 3)
+                right = apply_scale(right, f)
+            s0, s1 = size(left), size(right)
+            total = s0 + s1
+
+        delta = s0 * params["delta_ratio"]
+        min_size = total * min_ratio
+        max_pos = (s1 - min_size) / 2.0
+        max_neg = (min_size - s0) / 2.0
+        if delta >= 0:
+            delta = min(delta, max_pos)
+        else:
+            delta = max(delta, max_neg)
+        min_delta_mag = total * 0.08
+        if abs(delta) < min_delta_mag:
+            delta = max_pos if max_pos >= abs(max_neg) else max_neg
+
+        def resize_pair(src, delta_val):
+            base0 = size(src[0])
+            base1 = size(src[1])
+            target0 = base0 + delta_val
+            target1 = total - target0
+            f0 = (target0 / base0) ** (1 / 3)
+            f1 = (target1 / base1) ** (1 / 3)
+            o0 = apply_scale(src[0], f0)
+            o1 = apply_scale(src[1], f1)
+            return [o0, o1]
+
+        a_objs = [left, right]
+        b_objs = resize_pair(a_objs, delta)
+        c_objs = resize_pair(b_objs, delta)
+        scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
+        v = [[size(o0), size(o1)] for o0, o1 in [a_objs, b_objs, c_objs]]
+        meta = build_rule_meta(
+            self,
+            "R1",
+            2,
+            involved,
+            ["p", "r", "R"],
+            ["mirror(x)", "size(0)+size(1)"],
+            "coupled",
+            {"total": total},
+            v,
+            scenes,
+        )
+        return scenes[0], scenes[1], scenes[2], meta
+
+    def make_distractors(self, scene_c: Scene, rng, meta: Dict) -> Tuple[list[Scene], list[str]]:
+        if len(scene_c.objects) < 2:
+            return [], []
+        objs = clone_objects(scene_c.objects)
+        both_up = clone_objects(objs)
+        both_up[0] = apply_scale(both_up[0], 1.25)
+        both_up[1] = apply_scale(both_up[1], 1.25)
+
+        break_mirror = clone_objects(objs)
+        break_mirror[1] = apply_translation(break_mirror[1], np.array([0.12, 0.0, 0.0]))
+
+        swap_sizes = clone_objects(objs)
+        swap_sizes[0].r, swap_sizes[1].r = swap_sizes[1].r.copy(), swap_sizes[0].r.copy()
+
+        distractors = [
+            scene_from_objects(both_up),
+            scene_from_objects(break_mirror),
+            scene_from_objects(swap_sizes),
+        ]
+        reasons = ["尺寸同向变化", "镜像关系被破坏", "尺度互补方向错误"]
+        return distractors, reasons
+
 
 def build_medium_rules() -> List[Rule]:
     return [
@@ -826,4 +1402,10 @@ def build_medium_rules() -> List[Rule]:
         R3_2OrderingCycle(),
         R3_3DistanceVectorGeometric(),
         R1_10DualSizeConservation(),
+        R1_12AttributeSwap(),
+        R1_13OrientationFollowMotion(),
+        R1_14DistanceSizeCoupled(),
+        R1_15BoundingBoxConserved(),
+        R1_16AttributeShiftChain(),
+        R1_17MirrorSizeComplement(),
     ]

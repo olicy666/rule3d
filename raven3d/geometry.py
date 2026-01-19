@@ -100,6 +100,56 @@ class Cube(Primitive):
 
 
 @dataclass
+class TriangularPrism(Primitive):
+    side_length: float = 0.8
+    height: float = 1.0
+
+    def surface_area(self) -> float:
+        s = self.side_length
+        tri_h = s * math.sqrt(3) / 2.0
+        tri_area = 0.5 * s * tri_h
+        return 2 * tri_area + 3 * s * self.height
+
+    def _sample_local_surface(self, n_points: int) -> np.ndarray:
+        s = self.side_length
+        tri_h = s * math.sqrt(3) / 2.0
+        v0 = np.array([-s / 2.0, -tri_h / 3.0, 0.0])
+        v1 = np.array([s / 2.0, -tri_h / 3.0, 0.0])
+        v2 = np.array([0.0, 2.0 * tri_h / 3.0, 0.0])
+
+        tri_area = 0.5 * s * tri_h
+        side_area = s * self.height
+        probs = np.array([tri_area, tri_area, side_area, side_area, side_area], dtype=float)
+        probs = probs / probs.sum()
+        face_choices = np.random.choice(5, size=n_points, p=probs)
+        pts = np.zeros((n_points, 3))
+        z_top = self.height / 2.0
+        z_bottom = -self.height / 2.0
+
+        for i, face in enumerate(face_choices):
+            if face in (0, 1):
+                r1, r2 = np.random.uniform(size=2)
+                if r1 + r2 > 1.0:
+                    r1 = 1.0 - r1
+                    r2 = 1.0 - r2
+                p = v0 + r1 * (v1 - v0) + r2 * (v2 - v0)
+                p[2] = z_top if face == 0 else z_bottom
+                pts[i] = p
+            else:
+                if face == 2:
+                    a, b = v0, v1
+                elif face == 3:
+                    a, b = v1, v2
+                else:
+                    a, b = v2, v0
+                t = np.random.uniform()
+                z = np.random.uniform(z_bottom, z_top)
+                p = a + t * (b - a)
+                pts[i] = [p[0], p[1], z]
+        return pts
+
+
+@dataclass
 class Cylinder(Primitive):
     radius: float = 0.5
     height: float = 1.0
@@ -170,3 +220,60 @@ class Cone(Primitive):
             z = np.full(base_count, -self.height / 2.0)
             pts.append(np.stack([r * np.cos(theta), r * np.sin(theta), z], axis=1))
         return np.concatenate(pts, axis=0) if pts else np.zeros((0, 3))
+
+
+@dataclass
+class Capsule(Primitive):
+    radius: float = 0.35
+    height: float = 0.7
+
+    def surface_area(self) -> float:
+        side_area = 2 * math.pi * self.radius * self.height
+        cap_area = 4 * math.pi * self.radius**2
+        return side_area + cap_area
+
+    def _sample_local_surface(self, n_points: int) -> np.ndarray:
+        side_area = 2 * math.pi * self.radius * self.height
+        cap_area = 4 * math.pi * self.radius**2
+        probs = np.array([side_area, cap_area], dtype=float)
+        probs = probs / probs.sum()
+        side_count = np.random.binomial(n_points, probs[0])
+        cap_count = n_points - side_count
+
+        pts: List[np.ndarray] = []
+        if side_count > 0:
+            theta = np.random.uniform(0, 2 * math.pi, size=side_count)
+            z = np.random.uniform(-self.height / 2.0, self.height / 2.0, size=side_count)
+            pts.append(np.stack([self.radius * np.cos(theta), self.radius * np.sin(theta), z], axis=1))
+        if cap_count > 0:
+            half = cap_count // 2
+            counts = [(half, 1.0), (cap_count - half, -1.0)]
+            for count, sign in counts:
+                if count == 0:
+                    continue
+                dirs = random_unit_vectors(count)
+                dirs[:, 2] = np.abs(dirs[:, 2]) * sign
+                cap_center = np.array([0.0, 0.0, sign * self.height / 2.0])
+                pts.append(dirs * self.radius + cap_center)
+        return np.concatenate(pts, axis=0) if pts else np.zeros((0, 3))
+
+
+@dataclass
+class Torus(Primitive):
+    major_radius: float = 0.5
+    minor_radius: float = 0.2
+
+    def surface_area(self) -> float:
+        return 4 * math.pi**2 * self.major_radius * self.minor_radius
+
+    def _sample_local_surface(self, n_points: int) -> np.ndarray:
+        theta = np.random.uniform(0, 2 * math.pi, size=n_points)
+        phi = np.random.uniform(0, 2 * math.pi, size=n_points)
+        cos_phi = np.cos(phi)
+        sin_phi = np.sin(phi)
+        cos_theta = np.cos(theta)
+        sin_theta = np.sin(theta)
+        x = (self.major_radius + self.minor_radius * cos_phi) * cos_theta
+        y = (self.major_radius + self.minor_radius * cos_phi) * sin_theta
+        z = self.minor_radius * sin_phi
+        return np.stack([x, y, z], axis=1)

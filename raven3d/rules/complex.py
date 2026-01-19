@@ -18,6 +18,7 @@ from .utils import (
     dist,
     init_objects,
     scene_from_objects,
+    SHAPES,
     size,
     symmetry_flag,
 )
@@ -107,9 +108,8 @@ class C03ConditionalShapeScale(Rule):
         k = params["k"]
         objs = init_objects(rng, 1, m=2)
         involved = [0]
-        shape_options = ["cube", "sphere", "cylinder", "cone"]
         shape_a = objs[0].shape
-        shape_b = rng.choice([s for s in shape_options if s != shape_a])
+        shape_b = rng.choice([s for s in SHAPES if s != shape_a])
         base_size = size(objs[0])
         factor = (base_size * k / base_size) ** (1 / 3)
         b_obj = objs[0].copy()

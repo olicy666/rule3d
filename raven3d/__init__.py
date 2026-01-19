@@ -11,6 +11,9 @@ from .geometry import (
     Cube,
     Cylinder,
     Cone,
+    TriangularPrism,
+    Capsule,
+    Torus,
     rotation_matrix,
 )
 from .scene import Scene, ObjectState
@@ -24,6 +27,9 @@ __all__ = [
     "Cube",
     "Cylinder",
     "Cone",
+    "TriangularPrism",
+    "Capsule",
+    "Torus",
     "Scene",
     "ObjectState",
     "RuleDifficulty",

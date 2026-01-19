@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import copy
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List
 
 import numpy as np
 
-from .geometry import Primitive, Sphere, Cube, Cylinder, Cone, rotation_matrix
+from .geometry import Primitive, Sphere, Cube, Cylinder, Cone, TriangularPrism, Capsule, Torus, rotation_matrix
 
 
 @dataclass
@@ -18,7 +18,6 @@ class ObjectState:
     p: np.ndarray  # translation (centroid)
     rotation: np.ndarray  # Euler angles (radians)
     density: float = 1.0  # sampling weight
-    color: np.ndarray = field(default_factory=lambda: np.array([1.0, 1.0, 1.0]))
 
     def copy(self) -> "ObjectState":
         return ObjectState(
@@ -27,7 +26,6 @@ class ObjectState:
             p=self.p.copy(),
             rotation=self.rotation.copy(),
             density=float(self.density),
-            color=self.color.copy(),
         )
 
     def rotation_matrix(self) -> np.ndarray:
@@ -48,10 +46,16 @@ class ObjectState:
             return Sphere(radius=0.4, **base_kwargs)
         if shape == "cube":
             return Cube(edge_lengths=np.array([0.8, 0.8, 0.8]), **base_kwargs)
+        if shape == "triangular_prism":
+            return TriangularPrism(side_length=0.8, height=1.0, **base_kwargs)
         if shape == "cylinder":
             return Cylinder(radius=0.35, height=1.0, **base_kwargs)
         if shape == "cone":
             return Cone(radius=0.35, height=1.0, **base_kwargs)
+        if shape == "capsule":
+            return Capsule(radius=0.35, height=0.7, **base_kwargs)
+        if shape == "torus":
+            return Torus(major_radius=0.5, minor_radius=0.2, **base_kwargs)
         raise ValueError(f"Unsupported shape '{self.shape}'")
 
     def as_dict(self) -> dict:
@@ -63,7 +67,6 @@ class ObjectState:
             "R": rot_mat.tolist(),
             "rotation_euler": self.rotation.tolist(),
             "density": float(self.density),
-            "color": self.color.tolist(),
             "volume": self.volume(),
         }
 

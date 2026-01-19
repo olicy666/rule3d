@@ -21,6 +21,7 @@ RECORDS_PATH = Path("exam_records.csv")
 RESULTS_DIR = Path("results")
 TOTAL_QUESTIONS = 20
 PLY_HEIGHT = 320
+BIG_PLY_HEIGHT = 560
 POINTS_PER_CLOUD = 16384
 
 
@@ -172,6 +173,179 @@ def pl_component(ply_content_str: str, height: int = PLY_HEIGHT, reset_nonce: in
     components.html(html, height=height)
 
 
+def pl_multi_component(
+    ply_contents: List[str],
+    labels: List[str],
+    height: int = BIG_PLY_HEIGHT,
+    reset_nonce: int = 0,
+) -> None:
+    import uuid
+
+    container_id = f"pc_multi_{reset_nonce}_{uuid.uuid4().hex}"
+    overlay_id = f"{container_id}_overlay"
+    items = [{"label": label, "content": content} for label, content in zip(labels, ply_contents)]
+    items_json = json.dumps(items)
+    html = f"""
+    <div style="width:100%; height:{height}px; position:relative; background:#fff;">
+      <div id="{container_id}" style="width:100%; height:100%;"></div>
+      <div id="{overlay_id}" style="
+        position:absolute; left:8px; top:8px; font-size:12px; color:#333;
+        background:rgba(255,255,255,0.85); border:1px solid rgba(0,0,0,0.08);
+        padding:6px 8px; border-radius:8px; pointer-events:none;">
+        加载中…
+      </div>
+    </div>
+    <!-- reset:{reset_nonce} -->
+    <script type="importmap">
+      {{
+        "imports": {{
+          "three": "https://unpkg.com/three@0.161.0/build/three.module.js"
+        }}
+      }}
+    </script>
+    <script type="module">
+      import * as THREE from "three";
+      import {{ OrbitControls }} from "https://unpkg.com/three@0.161.0/examples/jsm/controls/OrbitControls.js";
+      import {{ PLYLoader }} from "https://unpkg.com/three@0.161.0/examples/jsm/loaders/PLYLoader.js";
+
+      const container = document.getElementById("{container_id}");
+      const overlay = document.getElementById("{overlay_id}");
+      function setOverlay(text) {{
+        if (overlay) overlay.textContent = text;
+      }}
+
+      const items = {items_json};
+      if (!items.length) {{
+        setOverlay("未选择点云");
+      }}
+
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0xffffff);
+
+      const camera = new THREE.PerspectiveCamera(45, 1, 0.001, 1e9);
+      camera.position.set(0, 0, 5);
+
+      const renderer = new THREE.WebGLRenderer({{ antialias: true, powerPreference: "high-performance" }});
+      renderer.setPixelRatio(1);
+      renderer.setClearColor(0xffffff, 1);
+      container.appendChild(renderer.domElement);
+
+      const controls = new OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.06;
+      controls.screenSpacePanning = true;
+
+      scene.add(new THREE.AmbientLight(0xffffff, 1.0));
+
+      const loader = new PLYLoader();
+      const group = new THREE.Group();
+      scene.add(group);
+      const materials = [];
+      const box = new THREE.Box3();
+      let hasBox = false;
+      let pending = 0;
+
+      function fitCamera(bounds) {{
+        const size = new THREE.Vector3();
+        const center = new THREE.Vector3();
+        bounds.getSize(size);
+        bounds.getCenter(center);
+
+        const radius = size.length() * 0.5;
+        controls.target.copy(center);
+
+        const fov = THREE.MathUtils.degToRad(camera.fov);
+        let dist = radius / Math.tan(fov / 2);
+        dist *= 1.15;
+
+        const dir = new THREE.Vector3().subVectors(camera.position, controls.target).normalize();
+        if (dir.lengthSq() < 1e-12) dir.set(0, 0, 1);
+        camera.position.copy(center).addScaledVector(dir, dist);
+        camera.near = Math.max(dist / 10000, 0.0001);
+        camera.far = Math.max(dist * 1000, camera.near + 1);
+        camera.updateProjectionMatrix();
+
+        controls.minDistance = dist * 0.85;
+        controls.maxDistance = dist * 1.35;
+
+        const sizeVal = Math.max(radius * 0.002, 0.001) * 3.0;
+        materials.forEach((material) => {{
+          material.size = sizeVal;
+        }});
+      }}
+
+      function addItem(item) {{
+        pending += 1;
+        const blob = new Blob([item.content], {{ type: "text/plain" }});
+        const url = URL.createObjectURL(blob);
+        loader.load(url, (geometry) => {{
+          URL.revokeObjectURL(url);
+          if (geometry.computeVertexNormals) {{
+            geometry.computeVertexNormals();
+          }}
+          const material = new THREE.PointsMaterial({{
+            size: 1.0,
+            vertexColors: true,
+            sizeAttenuation: true,
+            transparent: true,
+            opacity: 1.0
+          }});
+          materials.push(material);
+          const points = new THREE.Points(geometry, material);
+          points.name = item.label || "";
+          group.add(points);
+
+          geometry.computeBoundingBox();
+          if (geometry.boundingBox) {{
+            if (!hasBox) {{
+              box.copy(geometry.boundingBox);
+              hasBox = true;
+            }} else {{
+              box.union(geometry.boundingBox);
+            }}
+          }}
+
+          pending -= 1;
+          setOverlay(`已加载 ${group.children.length}/${items.length}`);
+          if (pending === 0 && hasBox) {{
+            fitCamera(box);
+            setOverlay(`已加载 ${items.length} 个点云`);
+          }}
+        }}, undefined, (err) => {{
+          URL.revokeObjectURL(url);
+          console.error(err);
+          pending -= 1;
+          setOverlay("加载失败，请检查控制台错误");
+        }});
+      }}
+
+      if (items.length) {{
+        items.forEach(addItem);
+      }}
+
+      function resize() {{
+        const width = container.clientWidth || 300;
+        const height = container.clientHeight || {height};
+        camera.aspect = width / height;
+        camera.updateProjectionMatrix();
+        renderer.setSize(width, height, false);
+      }}
+
+      const observer = new ResizeObserver(resize);
+      observer.observe(container);
+      resize();
+
+      function animate() {{
+        requestAnimationFrame(animate);
+        controls.update();
+        renderer.render(scene, camera);
+      }}
+      animate();
+    </script>
+    """
+    components.html(html, height=height)
+
+
 def stable_seed(username: str, mode: str) -> int:
     key = f"{username}|{mode}".encode("utf-8")
     digest = hashlib.sha256(key).digest()
@@ -196,6 +370,8 @@ def init_state() -> None:
         "score": 0,
         "seed": None,
         "viewer_reset_nonce": 0,
+        "show_big_view": False,
+        "big_view_selection": ["Ref1", "Ref2", "A", "B", "C", "D"],
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -223,6 +399,8 @@ def reset_exam_state() -> None:
     st.session_state.score = 0
     st.session_state.seed = None
     st.session_state.viewer_reset_nonce = 0
+    st.session_state.show_big_view = False
+    st.session_state.big_view_selection = ["Ref1", "Ref2", "A", "B", "C", "D"]
     for idx in range(TOTAL_QUESTIONS):
         st.session_state.pop(f"answer_{idx}", None)
 
@@ -459,9 +637,13 @@ def render_exam() -> None:
     exam_root = Path(st.session_state.exam_dir)
 
     st.subheader(f"题目 {idx + 1}/{TOTAL_QUESTIONS}")
-    if st.button("重置当前题目视角"):
-        st.session_state.viewer_reset_nonce += 1
-        st.rerun()
+    control_cols = st.columns([1, 1, 6])
+    with control_cols[0]:
+        if st.button("重置当前题目视角"):
+            st.session_state.viewer_reset_nonce += 1
+            st.rerun()
+    with control_cols[1]:
+        show_big_view = st.checkbox("大视图", value=st.session_state.show_big_view, key="show_big_view")
 
     ref_cols = st.columns(2)
     reset_nonce = st.session_state.viewer_reset_nonce
@@ -477,6 +659,29 @@ def render_exam() -> None:
             load_ply_text(exam_root / entry["ref2_path"]),
             reset_nonce=reset_nonce,
         )
+
+    if show_big_view:
+        st.markdown("### 合并点云视图")
+        view_options = ["Ref1", "Ref2", "A", "B", "C", "D"]
+        selected = st.multiselect(
+            "显示哪些点云",
+            view_options,
+            default=st.session_state.big_view_selection,
+            key="big_view_selection",
+        )
+        label_to_path = {
+            "Ref1": entry["ref1_path"],
+            "Ref2": entry["ref2_path"],
+            "A": entry["cand1_path"],
+            "B": entry["cand2_path"],
+            "C": entry["cand3_path"],
+            "D": entry["cand4_path"],
+        }
+        if not selected:
+            st.info("请选择要显示的点云。")
+        else:
+            contents = [load_ply_text(exam_root / label_to_path[label]) for label in selected]
+            pl_multi_component(contents, selected, reset_nonce=reset_nonce)
 
     cand_cols = st.columns(4)
     cand_paths = [
