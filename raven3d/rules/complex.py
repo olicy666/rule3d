@@ -992,7 +992,7 @@ class R4_1WeightStack(Rule):
         return {}
 
     def generate_triplet(self, params, rng):
-        shape_count = int(rng.integers(2, 6))
+        shape_count = int(rng.integers(2, 4))
         shapes = rng.choice(SHAPES, size=shape_count, replace=False).tolist()
 
         weights = []
