@@ -10,6 +10,7 @@ from .base import Rule, RuleDifficulty
 from .utils import (
     SHAPES,
     ang,
+    apply_density,
     apply_rotation,
     apply_scale,
     apply_translation,
@@ -22,6 +23,7 @@ from .utils import (
     dist,
     init_objects,
     order_indices_x,
+    random_object,
     scene_from_objects,
     size,
     symmetry_flag,
@@ -133,85 +135,9 @@ class R2_1DistanceGeometric(Rule):
 
 
 @dataclass
-class R2_2DirectionLocked(Rule):
-    def __init__(self) -> None:
-        super().__init__("R2-2", RuleDifficulty.MEDIUM, "方向保持距离变化", "dir 恒定, dist 线性")
-
-    def sample_params(self, rng) -> Dict:
-        step = float(rng.uniform(0.1, 0.3)) * (1 if rng.random() < 0.5 else -1)
-        base = float(rng.uniform(0.6, 1.0))
-        return {"step": step, "base": base}
-
-    def generate_triplet(self, params, rng):
-        base, step = params["base"], params["step"]
-        direction_vec = _unit_vector(rng)
-        objs = init_objects(rng, 2, m=2)
-        involved = [0, 1]
-
-        def place(distance: float):
-            o0, o1 = clone_objects(objs)
-            o0.p = np.zeros(3)
-            o1.p = direction_vec * distance
-            return [o0, o1]
-
-        distances = [base, base + step, base + 2 * step]
-        scenes_objs = [place(d) for d in distances]
-        scenes = [scene_from_objects(x) for x in scenes_objs]
-        v = distances
-        meta = build_rule_meta(
-            self,
-            "R2",
-            2,
-            involved,
-            ["p"],
-            ["dir(0,1)", "dist(0,1)"],
-            "direction-locked",
-            {"direction": direction_vec.tolist(), "delta": step},
-            v,
-            scenes,
-        )
-        return scenes[0], scenes[1], scenes[2], meta
-
-    def make_distractors(self, scene_c: Scene, rng, meta: Dict) -> Tuple[List[Scene], List[str]]:
-        if len(scene_c.objects) < 2:
-            return [], []
-        obj0, obj1 = scene_c.objects[0], scene_c.objects[1]
-        base_dist = dist(obj0, obj1)
-        if base_dist < 1e-6:
-            return [], []
-        base_dir = (obj1.p - obj0.p) / base_dist
-        origin = obj0.p.copy()
-
-        def pick_far_dir() -> np.ndarray:
-            for _ in range(30):
-                v = _unit_vector(rng)
-                if abs(float(np.dot(v, base_dir))) < 0.3:
-                    return v
-            return _unit_vector(rng)
-
-        def place(dir_vec: np.ndarray, distance: float) -> Scene:
-            o0, o1 = clone_objects(scene_c.objects)
-            o0.p = origin.copy()
-            o1.p = origin + dir_vec * distance
-            return scene_from_objects([o0, o1])
-
-        distractors = [
-            place(pick_far_dir(), base_dist),
-            place(base_dir, base_dist * float(rng.uniform(1.7, 2.3))),
-            place(-base_dir, base_dist * float(rng.uniform(0.4, 0.7))),
-        ]
-        reasons = [
-            "方向变化过大，未保持同一方向",
-            "距离显著偏大，未满足等差延续",
-            "方向反向且距离偏小，不符合规则",
-        ]
-        return distractors, reasons
-
-
-@dataclass
 class R2_3DirectionRotate(Rule):
     def __init__(self) -> None:
-        super().__init__("R2-3", RuleDifficulty.MEDIUM, "方向旋转等差角", "dir 旋转, dist 保持")
+        super().__init__("R2-3", RuleDifficulty.MEDIUM, "方向旋转等差", "dir 旋转, dist 保持")
 
     def sample_params(self, rng) -> Dict:
         theta = float(rng.uniform(math.pi / 12, math.pi / 6))
@@ -349,6 +275,565 @@ class M05TouchSequence(Rule):
             o1.p = direction_vec * distance / 2
             distractors.append(scene_from_objects([o0, o1]))
             reasons.append("两物体距离过大，未接触")
+        return distractors, reasons
+
+
+@dataclass
+class R2_9AcceleratedRotation(Rule):
+    def __init__(self) -> None:
+        super().__init__("R2-9", RuleDifficulty.MEDIUM, "加速旋转", "旋转幅度递增")
+
+    def sample_params(self, rng) -> Dict:
+        obj_count = int(rng.integers(1, 4))
+        axis_idx = int(rng.integers(0, 3))
+        sign = 1 if rng.random() < 0.5 else -1
+        delta1 = float(rng.uniform(math.pi / 4, math.pi / 2)) * sign
+        accel = float(rng.uniform(1.35, 1.75))
+        delta2 = delta1 * accel
+        return {"count": obj_count, "axis": axis_idx, "delta1": delta1, "delta2": delta2}
+
+    def generate_triplet(self, params, rng):
+        count = int(params["count"])
+        axis_idx = int(params["axis"])
+        delta1 = float(params["delta1"])
+        delta2 = float(params["delta2"])
+        objs = init_objects(rng, k=count, m=count)
+        involved = list(range(len(objs)))
+
+        delta_vec1 = np.zeros(3)
+        delta_vec1[axis_idx] = delta1
+        delta_vec2 = np.zeros(3)
+        delta_vec2[axis_idx] = delta2
+
+        a_objs = clone_objects(objs)
+        b_objs = [apply_rotation(o, delta_vec1) for o in a_objs]
+        c_objs = [apply_rotation(o, delta_vec2) for o in b_objs]
+        scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
+
+        def rot_mag(objs_in: List) -> float:
+            return float(np.mean([np.linalg.norm(o.rotation) for o in objs_in]))
+
+        v = [rot_mag(a_objs), rot_mag(b_objs), rot_mag(c_objs)]
+        meta = build_rule_meta(
+            self,
+            "R2",
+            len(involved),
+            involved,
+            ["R"],
+            ["rot(Oi)"],
+            "accelerated-rotation",
+            {"axis": axis_idx, "delta1": delta1, "delta2": delta2},
+            v,
+            scenes,
+        )
+        return scenes[0], scenes[1], scenes[2], meta
+
+    def make_distractors(self, scene_c: Scene, rng, meta: Dict) -> Tuple[List[Scene], List[str]]:
+        if not scene_c.objects:
+            return [], []
+        params = meta.get("pattern_params", {})
+        axis_idx = int(params.get("axis", 0))
+        delta2 = float(params.get("delta2", 0.0))
+        if abs(delta2) < 1e-6:
+            return [], []
+
+        delta_vec = np.zeros(3)
+        delta_vec[axis_idx] = delta2
+
+        def step(objs_in: List, delta: np.ndarray) -> List:
+            return [apply_rotation(o, delta) for o in objs_in]
+
+        b_objs = step(clone_objects(scene_c.objects), -delta_vec)
+        small = step(clone_objects(b_objs), delta_vec * 0.4)
+        same = clone_objects(b_objs)
+        reverse = step(clone_objects(b_objs), -delta_vec * 0.6)
+
+        distractors = [
+            scene_from_objects(same),
+            scene_from_objects(small),
+            scene_from_objects(reverse),
+        ]
+        reasons = [
+            "旋转幅度未增大，停留在上一帧",
+            "旋转幅度减小，未满足加速",
+            "旋转方向反向，未满足加速",
+        ]
+        return distractors, reasons
+
+
+@dataclass
+class R2_10GeometricFusion(Rule):
+    def __init__(self) -> None:
+        super().__init__("R2-10", RuleDifficulty.MEDIUM, "几何融合", "等差步伐向中心融合")
+
+    def sample_params(self, rng) -> Dict:
+        delta = float(rng.uniform(0.28, 0.38))
+        return {"delta": delta}
+
+    def generate_triplet(self, params, rng):
+        delta = float(params["delta"])
+        objs = init_objects(rng, k=3, m=3)
+        involved = [0, 1, 2]
+
+        for obj in objs:
+            direction_vec = _unit_vector(rng)
+            radius = float(rng.uniform(0.75, 1.1))
+            obj.p = direction_vec * radius
+
+        center = centroid(objs)
+        scales = [1.0, 1.0 - delta, 1.0 - 2 * delta]
+
+        def place(scale: float) -> List:
+            arranged = clone_objects(objs)
+            for o in arranged:
+                o.p = center + (o.p - center) * scale
+            return arranged
+
+        a_objs = place(scales[0])
+        b_objs = place(scales[1])
+        c_objs = place(scales[2])
+        scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
+        v = [[float(np.linalg.norm(o.p - center)) for o in s.objects] for s in scenes]
+        meta = build_rule_meta(
+            self,
+            "R2",
+            3,
+            involved,
+            ["p"],
+            ["cent(S)"],
+            "fusion-arithmetic",
+            {"delta": delta, "center": center.tolist(), "scales": scales},
+            v,
+            scenes,
+        )
+        return scenes[0], scenes[1], scenes[2], meta
+
+    def make_distractors(self, scene_c: Scene, rng, meta: Dict) -> Tuple[List[Scene], List[str]]:
+        if len(scene_c.objects) < 3:
+            return [], []
+        params = meta.get("pattern_params", {})
+        scales = params.get("scales")
+        center = np.array(params.get("center", [0.0, 0.0, 0.0]), dtype=float)
+        if not scales or len(scales) != 3:
+            return [], []
+        s2, s3 = float(scales[1]), float(scales[2])
+        if abs(s3) < 1e-6:
+            return [], []
+
+        def rescale(objs_in: List, target_scale: float) -> List:
+            arranged = clone_objects(objs_in)
+            for o in arranged:
+                vec = o.p - center
+                o.p = center + vec * (target_scale / s3)
+            return arranged
+
+        same = rescale(scene_c.objects, s2)
+        small = rescale(scene_c.objects, (s2 + s3) / 2)
+        overshoot = rescale(scene_c.objects, max(s3 - (s2 - s3), 0.08))
+        distractors = [scene_from_objects(x) for x in [same, small, overshoot]]
+        reasons = [
+            "融合未延续，停留在上一帧",
+            "融合步幅过小，未达到等差推进",
+            "融合过度，步幅偏大",
+        ]
+        return distractors, reasons
+
+
+@dataclass
+class R2_11OrbitalRotation(Rule):
+    def __init__(self) -> None:
+        super().__init__("R2-11", RuleDifficulty.MEDIUM, "行星公转", "多物体绕中心球体等速公转")
+
+    def sample_params(self, rng) -> Dict:
+        count = int(rng.integers(2, 5))
+        return {"count": count}
+
+    @staticmethod
+    def _unique_samples(rng, count: int, low: float, high: float, min_gap: float) -> List[float]:
+        vals: List[float] = []
+        attempts = 0
+        while len(vals) < count and attempts < 200:
+            candidate = float(rng.uniform(low, high))
+            if all(abs(candidate - v) > min_gap for v in vals):
+                vals.append(candidate)
+            attempts += 1
+        if len(vals) < count:
+            vals = np.linspace(low, high, count).tolist()
+        return vals
+
+    @staticmethod
+    def _rotate_about_center(p: np.ndarray, center: np.ndarray, angle: float) -> np.ndarray:
+        vec = p - center
+        cos_a = math.cos(angle)
+        sin_a = math.sin(angle)
+        x = vec[0] * cos_a - vec[1] * sin_a
+        y = vec[0] * sin_a + vec[1] * cos_a
+        return center + np.array([x, y, vec[2]])
+
+    def generate_triplet(self, params, rng):
+        count = int(params["count"])
+        center = np.zeros(3)
+        orbit_shapes = [s for s in SHAPES if s != "sphere"]
+        shapes = rng.choice(orbit_shapes, size=count, replace=False).tolist()
+        orbiters = [random_object(rng, shape=s) for s in shapes]
+        center_obj = random_object(rng, shape="sphere")
+        center_obj.p = center.copy()
+
+        radii = self._unique_samples(rng, count, 0.7, 1.1, 0.08)
+        base_angles = [float(rng.uniform(0, 2 * math.pi)) for _ in range(count)]
+        delta_base = float(rng.uniform(math.pi / 4, math.pi / 2))
+        delta_vals = self._unique_samples(rng, count, delta_base * 0.7, delta_base * 1.3, 0.2)
+        sign = 1.0 if rng.random() < 0.5 else -1.0
+        deltas = [sign * d for d in delta_vals]
+
+        def build_frame(step: int) -> List:
+            objs = [center_obj.copy()]
+            for i, orb in enumerate(orbiters):
+                obj = orb.copy()
+                angle = base_angles[i] + deltas[i] * step
+                obj.p = center + np.array(
+                    [radii[i] * math.cos(angle), radii[i] * math.sin(angle), 0.0]
+                )
+                objs.append(obj)
+            return objs
+
+        a_objs = build_frame(0)
+        b_objs = build_frame(1)
+        c_objs = build_frame(2)
+        scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
+        orbit_indices = list(range(1, count + 1))
+        v = []
+        for s in scenes:
+            angles = []
+            for idx in orbit_indices:
+                vec = s.objects[idx].p - center
+                angles.append(float(math.atan2(vec[1], vec[0])))
+            v.append(angles)
+        meta = build_rule_meta(
+            self,
+            "R2",
+            len(orbit_indices),
+            list(range(len(a_objs))),
+            ["p"],
+            ["orbit(theta_i)"],
+            "orbit-constant",
+            {
+                "center": center.tolist(),
+                "radii": radii,
+                "angles": base_angles,
+                "deltas": deltas,
+                "orbit_indices": orbit_indices,
+            },
+            v,
+            scenes,
+        )
+        return scenes[0], scenes[1], scenes[2], meta
+
+    def make_distractors(self, scene_c: Scene, rng, meta: Dict) -> Tuple[List[Scene], List[str]]:
+        if not scene_c.objects:
+            return [], []
+        params = meta.get("pattern_params", {})
+        center = np.array(params.get("center", [0.0, 0.0, 0.0]), dtype=float)
+        deltas = params.get("deltas")
+        orbit_indices = params.get("orbit_indices")
+        if deltas is None or orbit_indices is None:
+            return [], []
+        if len(deltas) != len(orbit_indices):
+            return [], []
+
+        def rotate_step(objs_in: List, scale: float) -> List:
+            out = clone_objects(objs_in)
+            for idx, delta in zip(orbit_indices, deltas):
+                out[idx].p = self._rotate_about_center(out[idx].p, center, delta * scale)
+            return out
+
+        b_objs = rotate_step(scene_c.objects, -1.0)
+        same = clone_objects(b_objs)
+        small = rotate_step(b_objs, 0.4)
+        reverse = rotate_step(b_objs, -0.6)
+        distractors = [
+            scene_from_objects(same),
+            scene_from_objects(small),
+            scene_from_objects(reverse),
+        ]
+        reasons = [
+            "旋转未延续，停留在上一帧",
+            "旋转幅度减小",
+            "旋转方向反向",
+        ]
+        return distractors, reasons
+
+
+@dataclass
+class R2_12PoseShift(Rule):
+    def __init__(self) -> None:
+        super().__init__("R2-12", RuleDifficulty.MEDIUM, "易位姿态转换", "按形状匹配的姿态变化持续")
+
+    def sample_params(self, rng) -> Dict:
+        count = int(rng.integers(2, 6))
+        return {"count": count}
+
+    def generate_triplet(self, params, rng):
+        count = int(params["count"])
+        shape_pool = [s for s in SHAPES if s not in ("sphere", "cylinder")]
+        shapes = rng.choice(shape_pool, size=count, replace=False).tolist()
+        objs = [random_object(rng, shape=s) for s in shapes]
+        involved = list(range(count))
+
+        axes = []
+        deltas = []
+        for _ in range(count):
+            axis_idx = int(rng.integers(0, 3))
+            roll = rng.random()
+            if roll < 0.4:
+                delta = float(rng.uniform(math.pi / 5, math.pi / 3))
+            elif roll < 0.8:
+                delta = -float(rng.uniform(math.pi / 5, math.pi / 3))
+            else:
+                delta = 0.0
+            axes.append(axis_idx)
+            deltas.append(delta)
+        if all(abs(d) < 1e-6 for d in deltas):
+            idx = int(rng.integers(0, count))
+            deltas[idx] = float(rng.uniform(math.pi / 5, math.pi / 3))
+
+        def build_frame(step: int) -> List:
+            arranged = clone_objects(objs)
+            for i, obj in enumerate(arranged):
+                delta_vec = np.zeros(3)
+                delta_vec[axes[i]] = deltas[i] * step
+                obj.rotation = obj.rotation + delta_vec
+                obj.p = rng.uniform(-0.8, 0.8, size=3)
+            return arranged
+
+        a_objs = build_frame(0)
+        b_objs = build_frame(1)
+        c_objs = build_frame(2)
+        scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
+        v = [[float(np.linalg.norm(o.rotation)) for o in s.objects] for s in scenes]
+        meta = build_rule_meta(
+            self,
+            "R2",
+            len(involved),
+            involved,
+            ["R"],
+            ["rot(Oi)"],
+            "pose-shift",
+            {"shapes": shapes, "axes": axes, "deltas": deltas},
+            v,
+            scenes,
+        )
+        return scenes[0], scenes[1], scenes[2], meta
+
+    def make_distractors(self, scene_c: Scene, rng, meta: Dict) -> Tuple[List[Scene], List[str]]:
+        if not scene_c.objects:
+            return [], []
+        params = meta.get("pattern_params", {})
+        axes = params.get("axes")
+        deltas = params.get("deltas")
+        if axes is None or deltas is None:
+            return [], []
+        if len(axes) != len(scene_c.objects) or len(deltas) != len(scene_c.objects):
+            return [], []
+
+        def apply_step(objs_in: List, scale: float) -> List:
+            out = clone_objects(objs_in)
+            for i, obj in enumerate(out):
+                delta_vec = np.zeros(3)
+                delta_vec[int(axes[i])] = float(deltas[i]) * scale
+                obj.rotation = obj.rotation + delta_vec
+            return out
+
+        b_objs = apply_step(scene_c.objects, -1.0)
+        same = clone_objects(b_objs)
+        small = apply_step(b_objs, 0.4)
+        reverse = apply_step(b_objs, -0.6)
+        distractors = [
+            scene_from_objects(same),
+            scene_from_objects(small),
+            scene_from_objects(reverse),
+        ]
+        reasons = [
+            "姿态未延续变化，停留在上一帧",
+            "姿态变化幅度减小",
+            "姿态变化方向反向",
+        ]
+        return distractors, reasons
+
+
+@dataclass
+class R2_13PositionScaleShift(Rule):
+    def __init__(self) -> None:
+        super().__init__("R2-13", RuleDifficulty.MEDIUM, "易位尺寸转换", "按形状匹配的尺寸变化持续")
+
+    def sample_params(self, rng) -> Dict:
+        count = int(rng.integers(2, 6))
+        return {"count": count}
+
+    def generate_triplet(self, params, rng):
+        count = int(params["count"])
+        shapes = rng.choice(SHAPES, size=count, replace=False).tolist()
+        objs = [random_object(rng, shape=s) for s in shapes]
+        involved = list(range(count))
+
+        factors = []
+        for _ in range(count):
+            roll = rng.random()
+            if roll < 0.4:
+                factors.append(float(rng.uniform(1.35, 1.75)))
+            elif roll < 0.8:
+                factors.append(float(rng.uniform(0.6, 0.8)))
+            else:
+                factors.append(1.0)
+        if all(abs(f - 1.0) < 1e-6 for f in factors):
+            idx = int(rng.integers(0, count))
+            factors[idx] = float(rng.uniform(1.35, 1.75))
+
+        def build_frame(step: int) -> List:
+            arranged = clone_objects(objs)
+            for i, obj in enumerate(arranged):
+                scale_factor = factors[i] ** step
+                if step > 0:
+                    obj = apply_scale(obj, scale_factor)
+                obj.p = rng.uniform(-0.8, 0.8, size=3)
+                arranged[i] = obj
+            return arranged
+
+        a_objs = build_frame(0)
+        b_objs = build_frame(1)
+        c_objs = build_frame(2)
+        scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
+        v = [[size(o) for o in s.objects] for s in scenes]
+        meta = build_rule_meta(
+            self,
+            "R2",
+            len(involved),
+            involved,
+            ["r"],
+            ["size(Oi)"],
+            "shape-conditioned",
+            {"shapes": shapes, "factors": factors},
+            v,
+            scenes,
+        )
+        return scenes[0], scenes[1], scenes[2], meta
+
+    def make_distractors(self, scene_c: Scene, rng, meta: Dict) -> Tuple[List[Scene], List[str]]:
+        if not scene_c.objects:
+            return [], []
+        params = meta.get("pattern_params", {})
+        factors = params.get("factors")
+        if factors is None or len(factors) != len(scene_c.objects):
+            return [], []
+
+        def apply_power(objs_in: List, power: float) -> List:
+            out = clone_objects(objs_in)
+            for i, obj in enumerate(out):
+                factor = float(factors[i]) ** power
+                out[i] = apply_scale(obj, factor)
+            return out
+
+        stay = apply_power(scene_c.objects, -1.0)
+        smaller = apply_power(scene_c.objects, -0.5)
+        reverse = apply_power(scene_c.objects, -2.0)
+        distractors = [
+            scene_from_objects(stay),
+            scene_from_objects(smaller),
+            scene_from_objects(reverse),
+        ]
+        reasons = [
+            "尺寸未延续变化，停留在上一帧",
+            "尺寸变化幅度减小",
+            "尺寸变化方向反向",
+        ]
+        return distractors, reasons
+
+
+@dataclass
+class R2_14PositionDensityShift(Rule):
+    def __init__(self) -> None:
+        super().__init__("R2-14", RuleDifficulty.MEDIUM, "易位密度转换", "按形状匹配的密度变化持续")
+
+    def sample_params(self, rng) -> Dict:
+        count = int(rng.integers(2, 6))
+        return {"count": count}
+
+    def generate_triplet(self, params, rng):
+        count = int(params["count"])
+        shapes = rng.choice(SHAPES, size=count, replace=False).tolist()
+        objs = [random_object(rng, shape=s) for s in shapes]
+        involved = list(range(count))
+
+        factors = []
+        for _ in range(count):
+            roll = rng.random()
+            if roll < 0.4:
+                factors.append(float(rng.uniform(1.7, 2.4)))
+            elif roll < 0.8:
+                factors.append(float(rng.uniform(0.4, 0.65)))
+            else:
+                factors.append(1.0)
+        if all(abs(f - 1.0) < 1e-6 for f in factors):
+            idx = int(rng.integers(0, count))
+            factors[idx] = float(rng.uniform(1.7, 2.4))
+
+        def build_frame(step: int) -> List:
+            arranged = clone_objects(objs)
+            for i, obj in enumerate(arranged):
+                density_factor = factors[i] ** step
+                if step > 0:
+                    obj = apply_density(obj, density_factor)
+                obj.p = rng.uniform(-0.8, 0.8, size=3)
+                arranged[i] = obj
+            return arranged
+
+        a_objs = build_frame(0)
+        b_objs = build_frame(1)
+        c_objs = build_frame(2)
+        scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
+        v = [[o.density for o in s.objects] for s in scenes]
+        meta = build_rule_meta(
+            self,
+            "R2",
+            len(involved),
+            involved,
+            ["d"],
+            ["den(Oi)"],
+            "shape-conditioned",
+            {"shapes": shapes, "factors": factors},
+            v,
+            scenes,
+        )
+        return scenes[0], scenes[1], scenes[2], meta
+
+    def make_distractors(self, scene_c: Scene, rng, meta: Dict) -> Tuple[List[Scene], List[str]]:
+        if not scene_c.objects:
+            return [], []
+        params = meta.get("pattern_params", {})
+        factors = params.get("factors")
+        if factors is None or len(factors) != len(scene_c.objects):
+            return [], []
+
+        def apply_power(objs_in: List, power: float) -> List:
+            out = clone_objects(objs_in)
+            for i, obj in enumerate(out):
+                factor = float(factors[i]) ** power
+                out[i] = apply_density(obj, factor)
+            return out
+
+        stay = apply_power(scene_c.objects, -1.0)
+        smaller = apply_power(scene_c.objects, -0.5)
+        reverse = apply_power(scene_c.objects, -2.0)
+        distractors = [
+            scene_from_objects(stay),
+            scene_from_objects(smaller),
+            scene_from_objects(reverse),
+        ]
+        reasons = [
+            "密度未延续变化，停留在上一帧",
+            "密度变化幅度减小",
+            "密度变化方向反向",
+        ]
         return distractors, reasons
 
 
@@ -1060,7 +1545,7 @@ class R1_11AttributeSwap(Rule):
 @dataclass
 class R1_12OrientationFollowMotion(Rule):
     def __init__(self) -> None:
-        super().__init__("R1-12", RuleDifficulty.MEDIUM, "朝向随位移", "移动方向与主轴一致")
+        super().__init__("R1-12", RuleDifficulty.MEDIUM, "主轴对齐位移", "移动方向与主轴一致")
 
     def sample_params(self, rng) -> Dict:
         step = float(rng.uniform(0.25, 0.4))
@@ -1119,7 +1604,7 @@ class R1_12OrientationFollowMotion(Rule):
 @dataclass
 class R1_13DistanceSizeCoupled(Rule):
     def __init__(self) -> None:
-        super().__init__("R1-13", RuleDifficulty.MEDIUM, "距离-尺度联动", "远离锚点则变大，靠近则变小")
+        super().__init__("R1-13", RuleDifficulty.MEDIUM, "距离驱动缩放", "远离锚点则变大，靠近则变小")
 
     def sample_params(self, rng) -> Dict:
         delta = float(rng.uniform(0.12, 0.2))
@@ -1205,7 +1690,7 @@ class R1_13DistanceSizeCoupled(Rule):
 @dataclass
 class R1_14MirrorSizeComplement(Rule):
     def __init__(self) -> None:
-        super().__init__("R1-14", RuleDifficulty.MEDIUM, "镜像+尺度互补", "镜像位置下尺寸一增一减")
+        super().__init__("R1-14", RuleDifficulty.MEDIUM, "镜像互补缩放", "镜像位置下尺寸一增一减")
 
     def sample_params(self, rng) -> Dict:
         delta_ratio = float(rng.uniform(0.3, 0.6))
@@ -1313,8 +1798,13 @@ class R1_14MirrorSizeComplement(Rule):
 def build_medium_rules() -> List[Rule]:
     return [
         R2_1DistanceGeometric(),
-        R2_2DirectionLocked(),
         R2_3DirectionRotate(),
+        R2_9AcceleratedRotation(),
+        R2_10GeometricFusion(),
+        R2_11OrbitalRotation(),
+        R2_12PoseShift(),
+        R2_13PositionScaleShift(),
+        R2_14PositionDensityShift(),
         R2_4ContainRatioArithmetic(),
         R2_5AngleArithmetic(),
         R3_1AreaArithmetic(),

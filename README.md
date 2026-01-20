@@ -1,6 +1,6 @@
 # Rule3D：基于规则的多几何体点云推理数据集生成器
 
-本项目实现 `program.md` 中的“数学原型”版生成器：每题输出 6 个点云（1/2 为参考帧 A/B，3/4/5/6 为四个候选，其中仅 1 个正确）和 `meta.json`，同时根目录提供所有题目的 `meta.json` 列表。规则总数 33（移除 R4 拓扑类），每帧场景由 2~5 个几何体组成。
+本项目实现 `program.md` 中的“数学原型”版生成器：每题输出 6 个点云（1/2 为参考帧 A/B，3/4/5/6 为四个候选，其中仅 1 个正确）和 `meta.json`，同时根目录提供所有题目的 `meta.json` 列表。规则总数 43，每帧场景由 2~8 个几何体组成。
 
 ## 快速开始
 环境：Python 3.10+，依赖仅 `numpy`。
@@ -11,8 +11,8 @@ python main.py --output output --num-samples 3 --points 4096 --seed 0
 - `--mode` 可选：
   - 主集合：`main`
   - 大类：`r1-only`, `r2-only`, `r3-only`
-  - 消融：`all-minus-r1`, `all-minus-r2`, `all-minus-r3`
-  - （已删除 `r4-only` 与 `all-minus-r4`）
+  - 大类：`r4-only`
+  - 消融：`all-minus-r1`, `all-minus-r2`, `all-minus-r3`, `all-minus-r4`
 - `--rules` 自定义规则列表（逗号分隔，如 `R1-1,R2-3,R3-2`，会覆盖 `--mode`）
   - 仅从给定规则编号中采样题目，编号不区分大小写，非法编号会直接报错提示可选列表。
   - 示例：`python main.py --num-samples 5 --rules R1-1,R2-3,R3-2 --points 4096`
@@ -36,7 +36,7 @@ output/meta.json  # 所有题目的 meta 列表
 点云文件固定颜色（每个文件内所有点相同）：1=深海蓝(31,119,180)，2=鲜亮橙(255,127,14)，3=森林绿(44,160,44)，4=砖红(214,39,40)，5=柔和紫(148,103,189)，6=可可棕(140,86,75)。
 
 ## 数学对象定义
-- 场景帧：$$X_t = \{O_{t,1}, \dots, O_{t,M_t}\},\quad M_t \in \{2,3,4,5\}$$
+- 场景帧：$$X_t = \{O_{t,1}, \dots, O_{t,M_t}\},\quad M_t \in \{2,3,4,5,6,7,8\}$$
 - 物体基础属性：$$s \in \{\texttt{cube},\texttt{sphere},\texttt{cylinder},\texttt{cone},\texttt{triangular\_prism},\texttt{capsule},\texttt{torus}\},\quad r=(r_x,r_y,r_z),\quad p\in\mathbb{R}^3,\quad R\in SO(3),\quad d\in\mathbb{R}_+$$（形状、尺度、位置、姿态、密度）
 - 采样：按权重 $$w_i = d_i\cdot\text{vol}(r_i)$$ 分配总点数到各物体，合并后写入同一 ply；meta 中保留对象级参数。
 
@@ -55,10 +55,10 @@ output/meta.json  # 所有题目的 meta 列表
 - 刚体/仿射：$$p_{t+1}=Q p_t + t,\quad R_{t+1}=Q R_t$$
 - 联动：多变量守恒/耦合（质心恒定、距离和恒定等）。
 
-## 规则清单（33 条：9 Simple + 14 Medium + 10 Complex）
+## 规则清单（43 条：12 Simple + 19 Medium + 12 Complex）
 所有规则 meta 包含 `rule_id, rule_group(R1/R2/R3), difficulty, K_R, involved_indices, base_attrs_used, derived_funcs, pattern_type, pattern_params, v1/v2/v3`。
 
-### R1 基本属性理解推理（14 条）
+### R1 基本属性理解推理（17 条）
 - **R1-1 等差统一缩放**：$$\text{size}_2-\text{size}_1=\Delta,\ \text{size}_3=2\text{size}_2-\text{size}_1$$
 - **R1-2 尺度轴置换循环**：$$(r_x,r_y,r_z)\to(r_y,r_z,r_x)\to(r_z,r_x,r_y)$$
 - **R1-3 固定轴旋转**：$$R_{t+1}=R_t\cdot\text{Rot}(\hat{u},\theta)$$
@@ -66,43 +66,55 @@ output/meta.json  # 所有题目的 meta 列表
 - **R1-5 固定向量平移**：$$p_{t+1}=p_t+\Delta p$$
 - **R1-6 密度等差**：$$d_2-d_1=\Delta,\ d_3=2d_2-d_1$$
 - **R1-7 形状变化继承**：A→B 哪些位置形状改变，B→C 在相同位置继续改变
-- **R1-8 尺度-位置联动**：$$\text{cent}(S_t)=\text{const},\ r_{t+1}=k r_t,\ p_{t+1}=p_t+\delta p$$
+- **R1-8 质心守恒缩放**：$$\text{cent}(S_t)=\text{const},\ r_{t+1}=k r_t,\ p_{t+1}=p_t+\delta p$$
 - **R1-9 双对象守恒**：$$\text{size}(i)_t+\text{size}(j)_t=C,\ \text{size}(i)\ \text{递增},\ \text{size}(j)\ \text{递减}$$
-- **R1-10 复合属性**：$$r_{t+1}=k r_t,\ R_{t+1}=R_t\text{Rot}(\hat{u},\theta)$$
+- **R1-10 复合位姿缩放**：$$r_{t+1}=k r_t,\ R_{t+1}=R_t\text{Rot}(\hat{u},\theta)$$
 - **R1-11 属性互换联动**：两物体形状/尺度交替互换（先形状后尺度或相反）
-- **R1-12 朝向随位移**：移动方向与主轴一致
-- **R1-13 距离-尺度联动**：远离锚点变大，靠近锚点变小
-- **R1-14 镜像+尺度互补**：镜像位置下尺寸一增一减
+- **R1-12 主轴对齐位移**：移动方向与主轴一致
+- **R1-13 距离驱动缩放**：远离锚点变大，靠近锚点变小
+- **R1-14 镜像互补缩放**：镜像位置下尺寸一增一减
+- **R1-15 距离尺寸倒数**：距离越近尺寸变化越剧烈
+- **R1-16 距离密度倒数**：距离越近密度变化越剧烈
+- **R1-17 几何体个数变化**：不同形状的数量按等差增加
 
-### R2 多属性空间关系推理（R2-1–R2-9）
+### R2 多属性空间关系推理（R2-1–R2-14）
 - **R2-1 成对距离等比**：$$\text{dist}_2=k\text{dist}_1,\ \text{dist}_3=k\text{dist}_2$$
-- **R2-2 方向保持**：$$\text{dir}_1=\text{dir}_2=\text{dir}_3,\ \text{dist}\ \text{线性/等比}$$
-- **R2-3 方向旋转等差角**：$$\angle(\text{dir}_t,\text{dir}_{t+1})=\theta,\ \text{dist}\ \text{恒定}$$
+- **R2-2 各向异性等比拉伸**：$$r_{t+1}=r_t\odot s,\ s_{axis}=k,\ s_{\text{others}}=\tfrac{1}{\sqrt{k}}\ \Rightarrow\ \text{vol 保持}$$
+- **R2-3 方向旋转等差**：$$\angle(\text{dir}_t,\text{dir}_{t+1})=\theta,\ \text{dist}\ \text{恒定}$$
 - **R2-4 包含比例等差**：$$\rho_{t+1}-\rho_t=\Delta,\ \rho_t\in(0,1)$$
 - **R2-5 夹角等差**：$$\text{ang}_3=2\text{ang}_2-\text{ang}_1$$
 - **R2-6 距离差分守恒**：$$\text{dist}(i,j)-\text{dist}(k,l)=C,\ \forall t$$
 - **R2-7 刚体一致变换**：集合施加相同刚体，任意成对距离保持不变。
 - **R2-8 相对姿态保持**：共同旋转 $$R^{(i)}_{t+1}=Q R^{(i)}_t$$，夹角恒定。
-- **R2-9 各向异性等比拉伸**：$$r_{t+1}=r_t\odot s,\ s_{axis}=k,\ s_{\text{others}}=\tfrac{1}{\sqrt{k}}\ \Rightarrow\ \text{vol 保持}$$
+- **R2-9 加速旋转**：旋转幅度在第二帧与第三帧之间继续增大。
+- **R2-10 几何融合**：多个对象以等差步伐向中心融合。
+- **R2-11 行星公转**：多个对象绕中心球体旋转，角速度各不相同。
+- **R2-12 易位姿态转换**：不同形状的姿态变化按形状延续。
+- **R2-13 易位尺寸转换**：不同形状的尺寸变化按形状延续。
+- **R2-14 易位密度转换**：不同形状的密度变化按形状延续。
 
-### R3 多物体构型推理（R3-1–R3-10）
+### R3 多物体构型推理（R3-1–R3-11）
 - **R3-1 三对象面积等差**：$$\text{area}_3=2\text{area}_2-\text{area}_1$$（允许 $\Delta=0$）
 - **R3-2 排序模式循环**：$$\text{ord}_x(S_1),\text{ord}_x(S_2),\text{ord}_x(S_3)\ \text{按固定置换}$$
 - **R3-3 距离集合等比**：左右独立等比缩放（$k_L,k_R$ 允许为 1）
-- **R3-4 对称+刚体**：$\text{sym}(S_2)=1,\ X_3=Q X_2+t$
-- **R3-5 组间质心距离等差**：$$u_t=\|\text{cent}(S_a)-\text{cent}(S_b)\|,\ u_3=2u_2-u_1$$
+- **R3-4 刚体对称变换**：$\text{sym}(S_2)=1,\ X_3=Q X_2+t$
+- **R3-5 质心距离等差**：$$u_t=\|\text{cent}(S_a)-\text{cent}(S_b)\|,\ u_3=2u_2-u_1$$
 - **R3-6 面积-边长守恒**：$$\text{area}(1,2,3)\cdot \text{dist}(1,2)=C$$
 - **R3-7 多对象位置轮换**：不同形状沿结构顺/逆时针相邻换位（直线/三角形/矩形/五角星）
 - **R3-8 多对象密度变化**：多对象密度按位置延续增减（直线/三角形/矩形/五角星）
 - **R3-9 多对象尺度变化**：多对象尺度按位置延续增减（直线/三角形/矩形/五角星）
 - **R3-10 多对象形状变化**：多对象形状按位置延续转换（直线/三角形/矩形/五角星）
+- **R3-11 正弦位置转换**：位置沿正弦采样点连续滑动（45°倍数/0°）
+
+### R4 复杂逻辑推理（R4-1）
+- **R4-1 重量叠加**：几何体数量变化引起整体下垂变化。
 
 
 
 ## 目录结构
 - `main.py`：CLI 入口与模式选择
 - `raven3d/scene.py`：`ObjectState`/`Scene` 多物体采样
-- `raven3d/rules/`：33 条规则（按 simple/medium/complex 划分）
+- `raven3d/rules/`：43 条规则（按 simple/medium/complex 划分）
 - `raven3d/dataset.py`：样本生成与 meta 写出
 - `program.md`：实施要求
 

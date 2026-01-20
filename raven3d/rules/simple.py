@@ -18,7 +18,9 @@ from .utils import (
     build_rule_meta,
     centroid,
     clone_objects,
+    dist,
     init_objects,
+    random_object,
     scene_from_objects,
     size,
     switch_shape,
@@ -226,9 +228,9 @@ class R1_2AxisPermutation(Rule):
 
 
 @dataclass
-class R2_9AnisotropicGeometric(Rule):
+class R2_2AnisotropicGeometric(Rule):
     def __init__(self) -> None:
-        super().__init__("R2-9", RuleDifficulty.SIMPLE, "各向异性等比拉伸", "体积不变的等比拉伸")
+        super().__init__("R2-2", RuleDifficulty.SIMPLE, "各向异性等比拉伸", "体积不变的等比拉伸")
 
     def sample_params(self, rng) -> Dict:
         factor = float(rng.uniform(1.25, 1.7))
@@ -745,7 +747,7 @@ class R1_7ShapeChangeFollow(Rule):
 @dataclass
 class R1_8ScaleCentroidCoupled(Rule):
     def __init__(self) -> None:
-        super().__init__("R1-8", RuleDifficulty.SIMPLE, "尺度-位置联动", "缩放并平移以保持参与集合质心不变")
+        super().__init__("R1-8", RuleDifficulty.SIMPLE, "质心守恒缩放", "缩放并平移以保持参与集合质心不变")
 
     def sample_params(self, rng) -> Dict:
         k = float(rng.uniform(1.2, 1.6))
@@ -786,15 +788,302 @@ class R1_8ScaleCentroidCoupled(Rule):
         return scenes[0], scenes[1], scenes[2], meta
 
 
+@dataclass
+class R1_15InverseDistanceSize(Rule):
+    def __init__(self) -> None:
+        super().__init__("R1-15", RuleDifficulty.SIMPLE, "距离尺寸倒数", "距离越近尺寸变化越剧烈")
+
+    def sample_params(self, rng) -> Dict:
+        k = float(rng.uniform(0.35, 0.65))
+        direction = "up" if rng.random() < 0.5 else "down"
+        return {"k": k, "direction": direction}
+
+    def generate_triplet(self, params, rng):
+        k = float(params["k"])
+        direction = params["direction"]
+        sign = 1.0 if direction == "up" else -1.0
+        objs = init_objects(rng, 3, m=3)
+        involved = [0, 1, 2]
+
+        d_close = float(rng.uniform(0.35, 0.55))
+        d_far = float(rng.uniform(0.85, 1.15))
+        objs[0].p = np.array([0.0, 0.0, 0.0])
+        objs[1].p = np.array([d_close, 0.0, 0.0])
+        objs[2].p = np.array([-d_far, 0.0, 0.0])
+
+        dists = [0.0, dist(objs[0], objs[1]), dist(objs[0], objs[2])]
+        inv = [0.0, 1.0 / (dists[1] + 1e-6), 1.0 / (dists[2] + 1e-6)]
+        inv_max = max(inv[1], inv[2])
+        ratios = [0.0, inv[1] / inv_max, inv[2] / inv_max]
+        size_factors = [1.0] + [1.0 + sign * k * ratios[i] for i in [1, 2]]
+        scale_factors = [f ** (1.0 / 3.0) for f in size_factors]
+
+        def scale_step(objs_in: List) -> List:
+            scaled = clone_objects(objs_in)
+            for idx in [1, 2]:
+                scaled[idx] = apply_scale(scaled[idx], scale_factors[idx])
+            return scaled
+
+        a_objs = clone_objects(objs)
+        b_objs = scale_step(a_objs)
+        c_objs = scale_step(b_objs)
+        scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
+        v = [[size(o) for o in s.objects] for s in scenes]
+        meta = build_rule_meta(
+            self,
+            "R1",
+            3,
+            involved,
+            ["r"],
+            ["size(Oi)"],
+            "inverse-distance",
+            {"k": k, "direction": direction, "anchor": 0, "factors": size_factors, "distances": dists},
+            v,
+            scenes,
+        )
+        return scenes[0], scenes[1], scenes[2], meta
+
+    def make_distractors(self, scene_c: Scene, rng, meta: Dict) -> Tuple[list[Scene], list[str]]:
+        if len(scene_c.objects) < 3:
+            return [], []
+        factors = meta.get("pattern_params", {}).get("factors")
+        if not factors or len(factors) != len(scene_c.objects):
+            return [], []
+        factors = np.array(factors, dtype=float)
+        sizes_c = np.array([size(o) for o in scene_c.objects], dtype=float)
+        base_sizes = sizes_c / np.where(factors == 0, 1.0, factors**2)
+
+        def build_with(target_sizes: np.ndarray) -> Scene:
+            objs = clone_objects(scene_c.objects)
+            for i, target in enumerate(target_sizes.tolist()):
+                cur = max(size(objs[i]), 1e-6)
+                safe_target = max(float(target), 1e-6)
+                scale = (safe_target / cur) ** (1 / 3)
+                objs[i] = apply_scale(objs[i], scale)
+            return scene_from_objects(objs)
+
+        wrong_no_change = base_sizes * factors
+        wrong_reverse = base_sizes
+        swapped = factors.copy()
+        swapped[1], swapped[2] = swapped[2], swapped[1]
+        wrong_swap = base_sizes * (swapped ** 2)
+        distractors = [build_with(x) for x in [wrong_no_change, wrong_reverse, wrong_swap]]
+        reasons = [
+            "变化未延续（停留在上一帧）",
+            "变化方向相反（回到初始）",
+            "距离与变化强度对应关系错误",
+        ]
+        return distractors, reasons
+
+
+@dataclass
+class R1_16InverseDistanceDensity(Rule):
+    def __init__(self) -> None:
+        super().__init__("R1-16", RuleDifficulty.SIMPLE, "距离密度倒数", "距离越近密度变化越剧烈")
+
+    def sample_params(self, rng) -> Dict:
+        k = float(rng.uniform(0.5, 0.8))
+        direction = "up" if rng.random() < 0.5 else "down"
+        return {"k": k, "direction": direction}
+
+    def generate_triplet(self, params, rng):
+        k = float(params["k"])
+        direction = params["direction"]
+        sign = 1.0 if direction == "up" else -1.0
+        objs = init_objects(rng, 3, m=3)
+        involved = [0, 1, 2]
+
+        d_close = float(rng.uniform(0.35, 0.55))
+        d_far = float(rng.uniform(0.85, 1.15))
+        objs[0].p = np.array([0.0, 0.0, 0.0])
+        objs[1].p = np.array([d_close, 0.0, 0.0])
+        objs[2].p = np.array([-d_far, 0.0, 0.0])
+
+        dists = [0.0, dist(objs[0], objs[1]), dist(objs[0], objs[2])]
+        inv = [0.0, 1.0 / (dists[1] + 1e-6), 1.0 / (dists[2] + 1e-6)]
+        inv_max = max(inv[1], inv[2])
+        ratios = [0.0, inv[1] / inv_max, inv[2] / inv_max]
+        density_factors = [1.0] + [max(1.0 + sign * k * ratios[i], 0.2) for i in [1, 2]]
+
+        def density_step(objs_in: List) -> List:
+            scaled = clone_objects(objs_in)
+            for idx in [1, 2]:
+                scaled[idx] = apply_density(scaled[idx], density_factors[idx])
+            return scaled
+
+        a_objs = clone_objects(objs)
+        b_objs = density_step(a_objs)
+        c_objs = density_step(b_objs)
+        scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
+        v = [[o.density for o in s.objects] for s in scenes]
+        meta = build_rule_meta(
+            self,
+            "R1",
+            3,
+            involved,
+            ["d"],
+            ["den(Oi)"],
+            "inverse-distance",
+            {"k": k, "direction": direction, "anchor": 0, "factors": density_factors, "distances": dists},
+            v,
+            scenes,
+        )
+        return scenes[0], scenes[1], scenes[2], meta
+
+    def make_distractors(self, scene_c: Scene, rng, meta: Dict) -> Tuple[list[Scene], list[str]]:
+        if len(scene_c.objects) < 3:
+            return [], []
+        factors = meta.get("pattern_params", {}).get("factors")
+        if not factors or len(factors) != len(scene_c.objects):
+            return [], []
+        factors = np.array(factors, dtype=float)
+        dens_c = np.array([o.density for o in scene_c.objects], dtype=float)
+        base_dens = dens_c / np.where(factors == 0, 1.0, factors**2)
+
+        def build_with(target_dens: np.ndarray) -> Scene:
+            objs = clone_objects(scene_c.objects)
+            for i, target in enumerate(target_dens.tolist()):
+                objs[i] = objs[i].copy()
+                objs[i].density = max(float(target), 1e-3)
+            return scene_from_objects(objs)
+
+        wrong_no_change = base_dens * factors
+        wrong_reverse = base_dens
+        swapped = factors.copy()
+        swapped[1], swapped[2] = swapped[2], swapped[1]
+        wrong_swap = base_dens * (swapped ** 2)
+        distractors = [build_with(x) for x in [wrong_no_change, wrong_reverse, wrong_swap]]
+        reasons = [
+            "变化未延续（停留在上一帧）",
+            "变化方向相反（回到初始）",
+            "距离与变化强度对应关系错误",
+        ]
+        return distractors, reasons
+
+
+@dataclass
+class R1_17ShapeCountArithmetic(Rule):
+    def __init__(self) -> None:
+        super().__init__("R1-17", RuleDifficulty.SIMPLE, "几何体个数变化", "形状计数等差增加")
+
+    def sample_params(self, rng) -> Dict:
+        return {}
+
+    def generate_triplet(self, params, rng):
+        shape_count = int(rng.integers(2, 5))
+        shapes = rng.choice(SHAPES, size=shape_count, replace=False).tolist()
+
+        while True:
+            total_a = int(rng.integers(shape_count, 7))
+            max_delta_sum = (8 - total_a) // 2
+            if max_delta_sum >= 1:
+                sum_delta = int(rng.integers(1, max_delta_sum + 1))
+                break
+
+        counts_a = [1] * shape_count
+        for _ in range(total_a - shape_count):
+            counts_a[int(rng.integers(0, shape_count))] += 1
+
+        delta_counts = [0] * shape_count
+        for _ in range(sum_delta):
+            delta_counts[int(rng.integers(0, shape_count))] += 1
+
+        counts_b = [a + d for a, d in zip(counts_a, delta_counts)]
+        counts_c = [a + 2 * d for a, d in zip(counts_a, delta_counts)]
+
+        def build_scene(counts: List[int]) -> Scene:
+            objs = []
+            for shape, num in zip(shapes, counts):
+                for _ in range(int(num)):
+                    objs.append(random_object(rng, shape=shape))
+            rng.shuffle(objs)
+            return scene_from_objects(objs)
+
+        scene_a = build_scene(counts_a)
+        scene_b = build_scene(counts_b)
+        scene_c = build_scene(counts_c)
+        scenes = [scene_a, scene_b, scene_c]
+        v = [counts_a, counts_b, counts_c]
+        involved = list(range(len(scene_c.objects)))
+        meta = build_rule_meta(
+            self,
+            "R1",
+            len(involved),
+            involved,
+            ["s"],
+            ["count(shape)"],
+            "count-arithmetic",
+            {"shapes": shapes, "counts_a": counts_a, "delta_counts": delta_counts},
+            v,
+            scenes,
+        )
+        return scenes[0], scenes[1], scenes[2], meta
+
+    def make_distractors(self, scene_c: Scene, rng, meta: Dict) -> Tuple[list[Scene], list[str]]:
+        params = meta.get("pattern_params", {})
+        shapes = params.get("shapes")
+        counts_a = params.get("counts_a")
+        delta_counts = params.get("delta_counts")
+        if not shapes or not counts_a or not delta_counts:
+            return [], []
+        if len(shapes) != len(counts_a) or len(shapes) != len(delta_counts):
+            return [], []
+
+        counts_b = [a + d for a, d in zip(counts_a, delta_counts)]
+        sum_delta = int(sum(delta_counts))
+
+        def build_scene(counts: List[int]) -> Scene:
+            objs = []
+            for shape, num in zip(shapes, counts):
+                for _ in range(int(num)):
+                    objs.append(random_object(rng, shape=shape))
+            rng.shuffle(objs)
+            return scene_from_objects(objs)
+
+        delta_perm = list(rng.permutation(delta_counts))
+        if delta_perm == delta_counts:
+            idx_from = next((i for i, d in enumerate(delta_perm) if d > 0), None)
+            if idx_from is not None:
+                idx_to = (idx_from + 1) % len(delta_perm)
+                delta_perm[idx_from] -= 1
+                delta_perm[idx_to] += 1
+
+        wrong_no = counts_b
+        wrong_shape = [b + d for b, d in zip(counts_b, delta_perm)]
+
+        if sum_delta > 1:
+            delta_under = list(delta_counts)
+            idx = int(rng.choice([i for i, d in enumerate(delta_under) if d > 0]))
+            delta_under[idx] -= 1
+            wrong_step = [b + d for b, d in zip(counts_b, delta_under)]
+        else:
+            wrong_step = counts_a
+
+        distractors = [
+            build_scene(wrong_no),
+            build_scene(wrong_shape),
+            build_scene(wrong_step),
+        ]
+        reasons = [
+            "数量未继续增加，停留在上一帧",
+            "增加形状对应关系错误",
+            "增加幅度不一致",
+        ]
+        return distractors, reasons
+
+
 def build_simple_rules() -> List[Rule]:
     return [
         R1_1ScaleArithmetic(),
         R1_2AxisPermutation(),
-        R2_9AnisotropicGeometric(),
+        R2_2AnisotropicGeometric(),
         R1_3FixedAxisRotation(),
         R1_4RotationDiscrete(),
         R1_5TranslationArithmetic(),
         R1_6DensityArithmetic(),
         R1_7ShapeChangeFollow(),
         R1_8ScaleCentroidCoupled(),
+        R1_15InverseDistanceSize(),
+        R1_16InverseDistanceDensity(),
+        R1_17ShapeCountArithmetic(),
     ]

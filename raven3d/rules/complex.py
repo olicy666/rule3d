@@ -36,7 +36,7 @@ def _unit_vector(rng: np.random.Generator) -> np.ndarray:
 @dataclass
 class R1_10ScaleRotateCoupled(Rule):
     def __init__(self) -> None:
-        super().__init__("R1-10", RuleDifficulty.COMPLEX, "尺度等比+旋转等差", "scale 与 rotation 复合")
+        super().__init__("R1-10", RuleDifficulty.COMPLEX, "复合位姿缩放", "scale 与 rotation 复合")
 
     def sample_params(self, rng) -> Dict:
         k = float(rng.uniform(1.15, 1.5))
@@ -139,7 +139,7 @@ class C03ConditionalShapeScale(Rule):
 @dataclass
 class R3_4SymmetryRigid(Rule):
     def __init__(self) -> None:
-        super().__init__("R3-4", RuleDifficulty.COMPLEX, "对称+刚体", "第二帧对称，第三帧刚体变换")
+        super().__init__("R3-4", RuleDifficulty.COMPLEX, "刚体对称变换", "第二帧对称，第三帧刚体变换")
 
     def sample_params(self, rng) -> Dict:
         theta = float(rng.uniform(math.pi / 6, math.pi / 4))
@@ -240,7 +240,7 @@ class R3_4SymmetryRigid(Rule):
 @dataclass
 class R3_5GroupCentroidDistance(Rule):
     def __init__(self) -> None:
-        super().__init__("R3-5", RuleDifficulty.COMPLEX, "组间质心距离等差", "两组对象质心距离等差")
+        super().__init__("R3-5", RuleDifficulty.COMPLEX, "质心距离等差", "两组对象质心距离等差")
 
     def sample_params(self, rng) -> Dict:
         delta = float(rng.uniform(0.2, 0.4)) * (1 if rng.random() < 0.5 else -1)
@@ -885,6 +885,277 @@ class R3_10ShapeShift(Rule):
         return scenes[0], scenes[1], scenes[2], meta
 
 
+@dataclass
+class R3_11SinePositionShift(Rule):
+    def __init__(self) -> None:
+        super().__init__("R3-11", RuleDifficulty.COMPLEX, "正弦位置转换", "位置沿 sin 采样点连续滑动")
+
+    @staticmethod
+    def _sine_positions() -> tuple[List[np.ndarray], List[int]]:
+        angles_deg = [0, 45, 90, 135, 180, 225, 270, 315]
+        x_vals = np.linspace(-0.8, 0.8, len(angles_deg))
+        positions = []
+        for idx, deg in enumerate(angles_deg):
+            rad = math.radians(deg)
+            positions.append(np.array([x_vals[idx], 0.6 * math.sin(rad), 0.0]))
+        return positions, angles_deg
+
+    def sample_params(self, rng) -> Dict:
+        return {}
+
+    def generate_triplet(self, params, rng):
+        positions, angles_deg = self._sine_positions()
+        n = len(positions)
+        step = 1 if rng.random() < 0.5 else -1
+        if step == 1:
+            start = int(rng.integers(0, n - 2))
+            if start > n - 3:
+                start = n - 3
+        else:
+            start = int(rng.integers(2, n - 1))
+            if start < 2:
+                start = 2
+
+        idx_a = [start, start + 1]
+        idx_b = [start + step, start + 1 + step]
+        idx_c = [start + 2 * step, start + 1 + 2 * step]
+
+        objs = init_objects(rng, 2, m=2)
+        involved = [0, 1]
+
+        def build_frame(indices: List[int]) -> List:
+            arranged = clone_objects(objs)
+            for obj, idx in zip(arranged, indices):
+                obj.p = positions[int(idx)]
+            return arranged
+
+        a_objs = build_frame(idx_a)
+        b_objs = build_frame(idx_b)
+        c_objs = build_frame(idx_c)
+        scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
+        v = [idx_a, idx_b, idx_c]
+        meta = build_rule_meta(
+            self,
+            "R3",
+            2,
+            involved,
+            ["p"],
+            ["sin-pos"],
+            "sine-adjacent",
+            {"angles_deg": angles_deg, "step": step, "start": start},
+            v,
+            scenes,
+        )
+        return scenes[0], scenes[1], scenes[2], meta
+
+    def make_distractors(self, scene_c: Scene, rng, meta: Dict) -> Tuple[list[Scene], list[str]]:
+        if len(scene_c.objects) < 2:
+            return [], []
+        positions, _angles = self._sine_positions()
+        params = meta.get("pattern_params", {})
+        step = int(params.get("step", 1))
+        v = meta.get("v", {})
+        idx_a = v.get("v1")
+        idx_b = v.get("v2")
+        idx_c = v.get("v3")
+        if not (idx_a and idx_b and idx_c):
+            return [], []
+
+        def build_from(indices: List[int]) -> Scene:
+            objs = clone_objects(scene_c.objects)
+            for obj, idx in zip(objs, indices):
+                obj.p = positions[int(idx)]
+            return scene_from_objects(objs)
+
+        gap_base = int(idx_c[0])
+        gap_idx = gap_base + 2 if gap_base + 2 < len(positions) else gap_base - 2
+        if gap_idx < 0 or gap_idx >= len(positions):
+            gap_idx = int(idx_a[0])
+        gap_pair = [gap_base, gap_idx]
+
+        candidates = [idx_b, idx_a, gap_pair]
+        distractors = [build_from(pair) for pair in candidates]
+        reasons = [
+            "位置未继续滑动，停留在上一帧",
+            "位置回退到上一阶段",
+            "位置不连续，跳过中间点",
+        ]
+        return distractors, reasons
+
+
+@dataclass
+class R4_1WeightStack(Rule):
+    def __init__(self) -> None:
+        super().__init__("R4-1", RuleDifficulty.COMPLEX, "重量叠加", "重量变化导致下垂程度变化")
+
+    def sample_params(self, rng) -> Dict:
+        return {}
+
+    def generate_triplet(self, params, rng):
+        shape_count = int(rng.integers(2, 6))
+        shapes = rng.choice(SHAPES, size=shape_count, replace=False).tolist()
+
+        weights = []
+        attempts = 0
+        while len(weights) < shape_count and attempts < 200:
+            candidate = float(rng.uniform(0.8, 1.6))
+            if all(abs(candidate - w) > 0.15 for w in weights):
+                weights.append(candidate)
+            attempts += 1
+        if len(weights) < shape_count:
+            weights = np.linspace(0.9, 1.5, shape_count).tolist()
+
+        max_total = 8
+        counts_a = None
+        counts_b = None
+        counts_c = None
+        change_idx = None
+        delta = None
+        for _ in range(200):
+            total_a = int(rng.integers(shape_count, max_total))
+            counts = [1] * shape_count
+            for _ in range(total_a - shape_count):
+                counts[int(rng.integers(0, shape_count))] += 1
+            idx = int(rng.integers(0, shape_count))
+            step = int(rng.choice([1, 2]))
+            sign = 1 if rng.random() < 0.5 else -1
+            delta_try = step * sign
+            b = counts[idx] + delta_try
+            c = counts[idx] + 2 * delta_try
+            if b < 1 or c < 1:
+                continue
+            total_c = total_a + 2 * delta_try
+            if total_c < shape_count or total_c > max_total:
+                continue
+            counts_a = counts
+            counts_b = counts.copy()
+            counts_b[idx] = b
+            counts_c = counts.copy()
+            counts_c[idx] = c
+            change_idx = idx
+            delta = delta_try
+            break
+        if counts_a is None:
+            counts_a = [1] * shape_count
+            counts_b = counts_a.copy()
+            counts_c = counts_a.copy()
+            change_idx = 0
+            delta = 1
+            counts_b[change_idx] += delta
+            counts_c[change_idx] += 2 * delta
+
+        base_y = 0.45
+        sag_k = 0.12
+
+        def total_weight(counts: List[int]) -> float:
+            return float(sum(w * c for w, c in zip(weights, counts)))
+
+        def build_scene(counts: List[int]) -> Scene:
+            objs = []
+            sag = base_y - sag_k * total_weight(counts)
+            sag = float(np.clip(sag, -0.8, 0.8))
+            for shape, num in zip(shapes, counts):
+                for _ in range(int(num)):
+                    obj = random_object(rng, shape=shape)
+                    obj.p = np.array(
+                        [
+                            float(rng.uniform(-0.75, 0.75)),
+                            sag,
+                            float(rng.uniform(-0.25, 0.25)),
+                        ]
+                    )
+                    objs.append(obj)
+            rng.shuffle(objs)
+            return scene_from_objects(objs)
+
+        scene_a = build_scene(counts_a)
+        scene_b = build_scene(counts_b)
+        scene_c = build_scene(counts_c)
+        scenes = [scene_a, scene_b, scene_c]
+        v = [
+            [total_weight(counts_a)],
+            [total_weight(counts_b)],
+            [total_weight(counts_c)],
+        ]
+        involved = list(range(len(scene_c.objects)))
+        meta = build_rule_meta(
+            self,
+            "R4",
+            len(involved),
+            involved,
+            ["s", "p"],
+            ["weight(S)"],
+            "weight-stack",
+            {
+                "shapes": shapes,
+                "weights": weights,
+                "counts_a": counts_a,
+                "delta": delta,
+                "change_idx": change_idx,
+                "base_y": base_y,
+                "sag_k": sag_k,
+            },
+            v,
+            scenes,
+        )
+        return scenes[0], scenes[1], scenes[2], meta
+
+    def make_distractors(self, scene_c: Scene, rng, meta: Dict) -> Tuple[list[Scene], list[str]]:
+        params = meta.get("pattern_params", {})
+        shapes = params.get("shapes")
+        weights = params.get("weights")
+        counts_a = params.get("counts_a")
+        delta = params.get("delta")
+        change_idx = params.get("change_idx")
+        base_y = float(params.get("base_y", 0.45))
+        sag_k = float(params.get("sag_k", 0.12))
+        if not shapes or not weights or counts_a is None or delta is None or change_idx is None:
+            return [], []
+
+        counts_b = counts_a.copy()
+        counts_b[change_idx] += delta
+        counts_c = counts_a.copy()
+        counts_c[change_idx] += 2 * delta
+
+        def total_weight(counts: List[int]) -> float:
+            return float(sum(w * c for w, c in zip(weights, counts)))
+
+        def build_scene(counts: List[int], sag_override: float | None = None) -> Scene:
+            objs = []
+            sag = base_y - sag_k * total_weight(counts) if sag_override is None else sag_override
+            sag = float(np.clip(sag, -0.8, 0.8))
+            for shape, num in zip(shapes, counts):
+                for _ in range(int(num)):
+                    obj = random_object(rng, shape=shape)
+                    obj.p = np.array(
+                        [
+                            float(rng.uniform(-0.75, 0.75)),
+                            sag,
+                            float(rng.uniform(-0.25, 0.25)),
+                        ]
+                    )
+                    objs.append(obj)
+            rng.shuffle(objs)
+            return scene_from_objects(objs)
+
+        alt_idx = (change_idx + 1) % len(shapes)
+        counts_wrong = counts_b.copy()
+        counts_wrong[alt_idx] += delta
+        sag_b = base_y - sag_k * total_weight(counts_b)
+
+        distractors = [
+            build_scene(counts_b),
+            build_scene(counts_wrong),
+            build_scene(counts_c, sag_override=float(sag_b)),
+        ]
+        reasons = [
+            "数量未继续变化，停留在上一帧",
+            "变化形状错误，重量增量不匹配",
+            "下垂程度不足，重量不匹配",
+        ]
+        return distractors, reasons
+
+
 def build_complex_rules() -> List[Rule]:
     return [
         R1_10ScaleRotateCoupled(),
@@ -897,4 +1168,6 @@ def build_complex_rules() -> List[Rule]:
         R3_8DensityShift(),
         R3_9ScaleShift(),
         R3_10ShapeShift(),
+        R3_11SinePositionShift(),
+        R4_1WeightStack(),
     ]
