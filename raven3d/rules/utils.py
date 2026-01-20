@@ -158,8 +158,12 @@ def symmetry_flag(objs: Sequence[ObjectState], axis_name: str = "x", tol: float 
     flags = []
     for i, obj in enumerate(objs):
         mirror_p = obj.p - 2 * np.dot(obj.p - c, n) * n
+        self_dist = float(np.linalg.norm(mirror_p - obj.p))
         dists = [np.linalg.norm(mirror_p - other.p) for j, other in enumerate(objs) if j != i]
-        flags.append(min(dists) <= tol if dists else True)
+        min_dist = min(dists) if dists else float("inf")
+        if self_dist < min_dist:
+            min_dist = self_dist
+        flags.append(min_dist <= tol)
     return int(all(flags))
 
 

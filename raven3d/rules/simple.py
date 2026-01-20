@@ -163,7 +163,8 @@ class R1_2AxisPermutation(Rule):
         super().__init__("R1-2", RuleDifficulty.SIMPLE, "尺度轴置换循环", "r_x/r_y/r_z 按固定置换循环")
 
     def sample_params(self, rng) -> Dict:
-        return {"order": [1, 2, 0]}
+        order = rng.choice([[1, 2, 0], [2, 0, 1]])
+        return {"order": [int(x) for x in order]}
 
     def generate_triplet(self, params, rng):
         objs = init_objects(rng, 1)

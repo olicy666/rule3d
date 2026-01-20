@@ -509,8 +509,14 @@ class R3_1AreaArithmetic(Rule):
         super().__init__("R3-1", RuleDifficulty.MEDIUM, "三对象面积等差", "三点面积等差变化")
 
     def sample_params(self, rng) -> Dict:
-        delta_ratio = float(rng.uniform(0.15, 0.35)) * (1 if rng.random() < 0.5 else -1)
-        return {"delta_ratio": delta_ratio}
+        mode = rng.choice(["up", "down", "flat"])
+        if mode == "flat":
+            return {"delta_ratio": 0.0, "mode": mode}
+        if mode == "up":
+            delta_ratio = float(rng.uniform(0.35, 0.6))
+        else:
+            delta_ratio = -float(rng.uniform(0.35, 0.45))
+        return {"delta_ratio": delta_ratio, "mode": mode}
 
     def generate_triplet(self, params, rng):
         objs = init_objects(rng, 3, m=3)
@@ -522,7 +528,8 @@ class R3_1AreaArithmetic(Rule):
         height1 = float(rng.uniform(0.4, 0.8))
         objs[2].p = np.array([0.0, height1, 0.0])
         area1 = 0.5 * base_len * height1
-        delta = area1 * params["delta_ratio"]
+        delta_ratio = float(params["delta_ratio"])
+        delta = area1 * delta_ratio
         area2 = area1 + delta
         area3 = area1 + 2 * delta
         height2 = 2 * area2 / base_len
@@ -542,12 +549,54 @@ class R3_1AreaArithmetic(Rule):
             ["p"],
             ["area(0,1,2)"],
             "arithmetic",
-            {"delta": delta},
+            {"delta": delta, "mode": params.get("mode", "up" if delta_ratio > 0 else ("down" if delta_ratio < 0 else "flat"))},
             v,
             scenes,
         )
         return scenes[0], scenes[1], scenes[2], meta
-    
+
+    def make_distractors(self, scene_c: Scene, rng, meta: Dict) -> Tuple[list[Scene], list[str]]:
+        if len(scene_c.objects) < 3:
+            return [], []
+        v = meta.get("v", {})
+        v1 = v.get("v1")
+        v2 = v.get("v2")
+        if not (v1 and v2):
+            return [], []
+        area1 = float(v1[0])
+        area2 = float(v2[0])
+        delta = area2 - area1
+        base_len = float(np.linalg.norm(scene_c.objects[1].p - scene_c.objects[0].p))
+        if base_len <= 1e-6:
+            return [], []
+
+        def build_scene(area_target: float) -> Scene:
+            objs = clone_objects(scene_c.objects)
+            height = max(area_target * 2 / base_len, 0.04)
+            new_p = objs[2].p.copy()
+            sign = 1.0 if new_p[1] >= 0 else -1.0
+            new_p[1] = height * sign
+            objs[2].p = new_p
+            return scene_from_objects(objs)
+
+        min_area = max(area1 * 0.12, 0.02)
+
+        if abs(delta) < 1e-6:
+            wrong_areas = [area1 * 1.6, area1 * 0.5, area1 * 2.1]
+            reasons = ["面积被放大", "面积被缩小", "面积放大过多"]
+        else:
+            step = abs(delta)
+            wrong_areas = [
+                area1,
+                area1 + (2 * step if delta < 0 else -2 * step),
+                area1 + (3 * step if delta > 0 else -3 * step),
+            ]
+            reasons = ["面积未变化", "面积变化方向相反", "面积步长过大"]
+
+        wrong_areas = [max(min_area, float(a)) for a in wrong_areas]
+        distractors = [build_scene(a) for a in wrong_areas]
+        return distractors, reasons
+
     @staticmethod
     def _area(objs: Sequence) -> float:
         return float(0.5 * np.linalg.norm(np.cross(objs[1].p - objs[0].p, objs[2].p - objs[0].p)))
@@ -690,29 +739,57 @@ class M11CentroidArithmetic(Rule):
 @dataclass
 class R3_3DistanceVectorGeometric(Rule):
     def __init__(self) -> None:
-        super().__init__("R3-3", RuleDifficulty.MEDIUM, "距离集合等比缩放", "三对距离成等比")
+        super().__init__("R3-3", RuleDifficulty.MEDIUM, "距离集合等比缩放", "左右独立等比缩放")
 
     def sample_params(self, rng) -> Dict:
-        k = float(rng.uniform(1.5, 2.0))
-        return {"k": k}
+        mode_left = rng.choice(["up", "down", "flat"], p=[0.45, 0.45, 0.10])
+        mode_right = rng.choice(["up", "down", "flat"], p=[0.45, 0.45, 0.10])
+
+        def pick_k(mode: str) -> float:
+            if mode == "flat":
+                return 1.0
+            if mode == "up":
+                return float(rng.uniform(1.45, 1.9))
+            return float(rng.uniform(0.55, 0.8))
+
+        return {
+            "k_left": pick_k(mode_left),
+            "k_right": pick_k(mode_right),
+            "mode_left": mode_left,
+            "mode_right": mode_right,
+        }
 
     def generate_triplet(self, params, rng):
-        k = params["k"]
+        k_left = float(params["k_left"])
+        k_right = float(params["k_right"])
         objs = init_objects(rng, 3, m=3)
         involved = [0, 1, 2]
+        base_offset = float(rng.uniform(0.6, 0.9))
+        y_offsets = rng.uniform(-0.25, 0.25, size=3)
+        z_offsets = rng.uniform(-0.2, 0.2, size=3)
+        objs[0].p = np.array([-base_offset, y_offsets[0], z_offsets[0]])
+        objs[1].p = np.array([0.0, y_offsets[1], z_offsets[1]])
+        objs[2].p = np.array([base_offset, y_offsets[2], z_offsets[2]])
         base_cent = centroid(objs)
 
-        def scale_positions(objs_in: Sequence, factor: float):
+        def scale_positions(objs_in: Sequence, left_factor: float, right_factor: float):
             scaled = []
             for o in objs_in:
                 new_o = o.copy()
-                new_o.p = base_cent + (o.p - base_cent) * factor
+                delta = o.p - base_cent
+                if delta[0] < -1e-6:
+                    factor = left_factor
+                elif delta[0] > 1e-6:
+                    factor = right_factor
+                else:
+                    factor = 1.0
+                new_o.p = base_cent + delta * factor
                 scaled.append(new_o)
             return scaled
 
         a_objs = clone_objects(objs)
-        b_objs = scale_positions(objs, k)
-        c_objs = scale_positions(b_objs, k)
+        b_objs = scale_positions(objs, k_left, k_right)
+        c_objs = scale_positions(b_objs, k_left, k_right)
         scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
 
         def dist_vec(objects: Sequence) -> List[float]:
@@ -726,8 +803,13 @@ class R3_3DistanceVectorGeometric(Rule):
             involved,
             ["p"],
             ["dist-set"],
-            "geometric",
-            {"k": k},
+            "piecewise",
+            {
+                "k_left": k_left,
+                "k_right": k_right,
+                "mode_left": params.get("mode_left"),
+                "mode_right": params.get("mode_right"),
+            },
             v,
             scenes,
         )
