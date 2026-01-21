@@ -51,12 +51,8 @@ R3: Set[str] = {
     "R3-10",
     "R3-11",
 }
-R4: Set[str] = {
-    "R4-1",
-}
-
 # 子类划分
-ALL_RULES: Set[str] = set().union(R1, R2, R3, R4)
+ALL_RULES: Set[str] = set().union(R1, R2, R3)
 
 # 预设模式 -> 可选规则集合
 MODE_TO_RULES: Dict[str, Set[str]] = {
@@ -64,11 +60,9 @@ MODE_TO_RULES: Dict[str, Set[str]] = {
     "r1-only": R1,
     "r2-only": R2,
     "r3-only": R3,
-    "r4-only": R4,
     "all-minus-r1": ALL_RULES - R1,
     "all-minus-r2": ALL_RULES - R2,
     "all-minus-r3": ALL_RULES - R3,
-    "all-minus-r4": ALL_RULES - R4,
 }
 
 

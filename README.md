@@ -1,6 +1,6 @@
 # Rule3D：基于规则的多几何体点云推理数据集生成器
 
-本项目实现 `program.md` 中的“数学原型”版生成器：每题输出 6 个点云（1/2 为参考帧 A/B，3/4/5/6 为四个候选，其中仅 1 个正确）和 `meta.json`，同时根目录提供所有题目的 `meta.json` 列表。规则总数 43，每帧场景由 2~8 个几何体组成。
+本项目实现 `program.md` 中的“数学原型”版生成器：每题输出 6 个点云（1/2 为参考帧 A/B，3/4/5/6 为四个候选，其中仅 1 个正确）和 `meta.json`，同时根目录提供所有题目的 `meta.json` 列表。规则总数 42，每帧场景由 2~8 个几何体组成。
 
 ## 快速开始
 环境：Python 3.10+，依赖仅 `numpy`。
@@ -11,8 +11,7 @@ python main.py --output output --num-samples 3 --points 4096 --seed 0
 - `--mode` 可选：
   - 主集合：`main`
   - 大类：`r1-only`, `r2-only`, `r3-only`
-  - 大类：`r4-only`
-  - 消融：`all-minus-r1`, `all-minus-r2`, `all-minus-r3`, `all-minus-r4`
+  - 消融：`all-minus-r1`, `all-minus-r2`, `all-minus-r3`
 - `--rules` 自定义规则列表（逗号分隔，如 `R1-1,R2-3,R3-2`，会覆盖 `--mode`）
   - 仅从给定规则编号中采样题目，编号不区分大小写，非法编号会直接报错提示可选列表。
   - 示例：`python main.py --num-samples 5 --rules R1-1,R2-3,R3-2 --points 4096`
@@ -55,7 +54,7 @@ output/meta.json  # 所有题目的 meta 列表
 - 刚体/仿射：$$p_{t+1}=Q p_t + t,\quad R_{t+1}=Q R_t$$
 - 联动：多变量守恒/耦合（质心恒定、距离和恒定等）。
 
-## 规则清单（43 条：12 Simple + 19 Medium + 12 Complex）
+## 规则清单（42 条：12 Simple + 19 Medium + 11 Complex）
 所有规则 meta 包含 `rule_id, rule_group(R1/R2/R3), difficulty, K_R, involved_indices, base_attrs_used, derived_funcs, pattern_type, pattern_params, v1/v2/v3`。
 
 ### R1 基本属性理解推理（17 条）
@@ -106,15 +105,12 @@ output/meta.json  # 所有题目的 meta 列表
 - **R3-10 多对象形状变化**：多对象形状按位置延续转换（直线/三角形/矩形/五角星）
 - **R3-11 正弦位置转换**：位置沿正弦采样点连续滑动（45°倍数/0°）
 
-### R4 复杂逻辑推理（R4-1）
-- **R4-1 重量叠加**：几何体数量变化引起整体下垂变化。
-
 
 
 ## 目录结构
 - `main.py`：CLI 入口与模式选择
 - `raven3d/scene.py`：`ObjectState`/`Scene` 多物体采样
-- `raven3d/rules/`：43 条规则（按 simple/medium/complex 划分）
+- `raven3d/rules/`：42 条规则（按 simple/medium/complex 划分）
 - `raven3d/dataset.py`：样本生成与 meta 写出
 - `program.md`：实施要求
 
