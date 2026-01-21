@@ -505,7 +505,7 @@ def load_records() -> pd.DataFrame:
 
 
 def render_admin() -> None:
-    st.title("Raven3D 管理后台")
+    st.title("SPIRAL3D:Structured Perception to Intelligent Reasoning And Logic in 3D 管理后台")
     if st.button("退出登录"):
         reset_exam_state()
         st.session_state.logged_in = False
@@ -591,7 +591,7 @@ def render_admin() -> None:
 
 
 def render_exam() -> None:
-    st.title("Raven3D 3D 逻辑推理考试")
+    st.title("SPIRAL3D:Structured Perception to Intelligent Reasoning And Logic in 3D 逻辑推理考试")
 
     st.sidebar.header("考试设置")
     st.sidebar.write(f"用户：{st.session_state.username}")
@@ -771,7 +771,7 @@ def render_exam() -> None:
 
 
 def render_login() -> None:
-    st.title("Raven3D 登录")
+    st.title("SPIRAL3D:Structured Perception to Intelligent Reasoning And Logic in 3D 登录")
     with st.form("login_form"):
         username = st.text_input("姓名/ID")
         password = st.text_input("管理员密码（仅 admin）", type="password")
@@ -796,7 +796,10 @@ def render_login() -> None:
 
 
 def main() -> None:
-    st.set_page_config(page_title="Raven3D Exam", layout="wide")
+    st.set_page_config(
+        page_title="SPIRAL3D:Structured Perception to Intelligent Reasoning And Logic in 3D",
+        layout="wide",
+    )
     init_state()
     if not st.session_state.logged_in:
         render_login()

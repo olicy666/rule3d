@@ -1,5 +1,6 @@
 """
-Raven3D dataset generator package.
+SPIRAL3D:Structured Perception to Intelligent Reasoning And Logic in 3D
+dataset generator package.
 
 The package exposes primitives, scenes, rules, and a dataset generator used
 to build three-step point cloud reasoning samples as described in program.md.

@@ -1,4 +1,4 @@
-# Rule3D：基于规则的多几何体点云推理数据集生成器
+# SPIRAL3D:Structured Perception to Intelligent Reasoning And Logic in 3D
 
 本项目实现 `program.md` 中的“数学原型”版生成器：每题输出 6 个点云（1/2 为参考帧 A/B，3/4/5/6 为四个候选，其中仅 1 个正确）和 `meta.json`，同时根目录提供所有题目的 `meta.json` 列表。规则总数 42，每帧场景由 2~8 个几何体组成。
 
