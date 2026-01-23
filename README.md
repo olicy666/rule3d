@@ -1,7 +1,5 @@
 # SPIRAL3D:Structured Perception to Intelligent Reasoning And Logic in 3D
 
-本项目实现 `program.md` 中的“数学原型”版生成器：每题输出 6 个点云（1/2 为参考帧 A/B，3/4/5/6 为四个候选，其中仅 1 个正确）和 `meta.json`，同时根目录提供所有题目的 `meta.json` 列表。规则总数 42，每帧场景由 2~8 个几何体组成。
-
 ## 快速开始
 环境：Python 3.10+，依赖仅 `numpy`。
 ```bash
@@ -34,30 +32,41 @@ output/meta.json  # 所有题目的 meta 列表
 ```
 点云文件固定颜色（每个文件内所有点相同）：1=深海蓝(31,119,180)，2=鲜亮橙(255,127,14)，3=森林绿(44,160,44)，4=砖红(214,39,40)，5=柔和紫(148,103,189)，6=可可棕(140,86,75)。
 
-## 数学对象定义
-- 场景帧：$$X_t = \{O_{t,1}, \dots, O_{t,M_t}\},\quad M_t \in \{2,3,4,5,6,7,8\}$$
-- 物体基础属性：$$s \in \{\texttt{cube},\texttt{sphere},\texttt{cylinder},\texttt{cone},\texttt{triangular\_prism},\texttt{capsule},\texttt{torus}\},\quad r=(r_x,r_y,r_z),\quad p\in\mathbb{R}^3,\quad R\in SO(3),\quad d\in\mathbb{R}_+$$（形状、尺度、位置、姿态、密度）
-- 采样：按权重 $$w_i = d_i\cdot\text{vol}(r_i)$$ 分配总点数到各物体，合并后写入同一 ply；meta 中保留对象级参数。
+顶层认知原型：
+Level 1 (R1): 固有属性感知
+- 认知视角： Intrinsic Attribute Perception（固有属性感知）。
+  - 描述： 就像人类婴儿首先学会识别“红色”、“圆形”一样，模型首先必须具备高保真的特征解耦能力。它需要从杂乱的 3D 点云中准确提取出每个物体的独立物理属性（尺寸、密度、姿态），不受环境干扰。
+- 图论视角： Node Embedding Refinement（节点嵌入精炼）。
+  - 定义： 给定图  $$G=(V, E)$$，R1 考察模型近似一元函数  $$f(v_i)$$的能力。
+  - 数学： 目标是最小化属性预测误差  $$\mathcal{L}_{R1} = \sum || \hat{y}_{attr} - f(v_i) ||$$
+Insight：强调是从非结构化的 Raw Point Cloud 到结构化的 Graph Node 的特征提取过程，这本身就是 3D 视觉的一大难点。
+Level 2 (R2): 显式拓扑推理
+- 认知视角： Relational Reasoning（关系推理）。
+  - 描述： 认知升级。模型从关注点扩展到关注线，必须理解物体间的空间拓扑（如包含、相邻）和度量关系（如距离、角度），建立场景的空间语境。
+- 图论视角： Edge Message Passing（边消息传递）。
+  - 定义： R2 考察模型近似二元函数  $$g(v_i, v_j)$$的能力。
+  - 数学： 这是一个  $$O(N^2)$$的成对交互问题，模型必须准确编码边属性 $$e_{ij}$$。
+Insight：强调 R2 使得模型不再是看一堆点，而是结合多个点判断点间的关系。
+Level 3 (R3): 隐式结构推理
+- 认知视角： Abstract Systemic Reasoning（抽象系统推理） 
+  - 描述： 真正的智力飞跃。模型不仅要看清现有的点和线，还要想象出不存在的结构。比如看到三个点，脑子里要画出一个三角形并计算面积；看到一堆乱点，要能分出 Group A 和 Group B 并找到它们的重心。这是对潜在变量的推理。
+- 图论视角： Subgraph / Hyper-edge Pattern Recognition（子图/超边模式识别）。
+  - 定义： R3 考察模型在节点子集  $$V_{sub} \subset V$$ 上提取高阶特征  $$H(V_{sub})$$的能力。
+  - 数学： 涉及超边的构建。比如面积是三个节点  $$(v_1, v_2, v_3)$$共同决定的属性；对称性是整个图 $$G$$ 的全局同构属性。
+Insight：聚焦于如何高效处理高阶依赖，将题目包装为抽象认知
+Level 4 (R4): 抽象逻辑演化——不再完全约束原图表的形式，会学会演化该图表
+- 认知视角： Counterfactual & Planning（反事实与规划）。
+  - 描述： 认知的最高阶——想象力，模型不再满足于静态观察，它开始在脑海中演化这个场景。它思考“如果……会怎样”（If... then...），这需要对物理规律和几何约束的深刻理解。
+- 图论视角： Dynamic Graph Evolution（动态图演化）。
+  - 定义： R4 考察模型预测图状态转移的能力： $$
+G_{t+1} = \mathcal{T}(G_t, \text{Action})$$。
+  - 实现（基于推理轨迹）： 推理轨迹就是图的演化步：
+    1. Step 1: 识别当前子图结构（Constraint Identification）。
+    2. Step 2: 施加扰动（Perturbation）。
+    3. Step 3: 预测节点属性或边关系的更新（State Update）。
+Insight：把静态的 3D 问答提升到了World Model的高度。
 
-## 派生函数（仅依赖 (s,r,p,R,d)）
-- 单体：$$\text{size}(O)=r_x r_y r_z,\quad \text{ar}(O)=(\tfrac{r_x}{r_y},\tfrac{r_y}{r_z}),\quad \text{axis}_k(O)=R e_k,\quad \text{den}(O)=d$$
-- 成对：$$\text{dist}(i,j)=\|p_i-p_j\|_2,\quad \text{dir}(i,j)=\tfrac{p_j-p_i}{\|p_j-p_i\|_2+\epsilon},\quad \text{ang}(i,j)=\arccos(\langle\text{axis}_1(i),\text{axis}_1(j)\rangle)$$
-  $$\text{touch}(i,j)=\mathbf{1}[\text{dist}\le \rho_i+\rho_j+\tau],\quad \text{contain}(i,j)=\mathbf{1}[\text{AABB}(i)\supseteq\text{AABB}(j)]$$
-  $$\text{contain\_ratio}(i,j)=\min_k \frac{\min(a^{max}_k-b^{max}_k,\,b^{min}_k-a^{min}_k)}{(a^{max}_k-a^{min}_k)/2-(b^{max}_k-b^{min}_k)/2}$$
-- 多体：$$\text{cent}(S)=\tfrac{1}{|S|}\sum_{i\in S}p_i,\quad \text{area}(1,2,3)=\tfrac{1}{2}\|(p_2-p_1)\times(p_3-p_1)\|$$
-  $$\text{ord}_x(S)=\text{argsort}([p_{i,x}]),\quad \text{sym}(S)=\mathbf{1}[\forall i\,\exists j:\|p_j-\pi_n(p_i)\|\le\delta]$$
-
-## 模式变换（可枚举）
-- 等差：$$v_{t+1}-v_t=\Delta\ \Rightarrow\ v_3=2v_2-v_1$$
-- 等比：$$v_{t+1}=k\odot v_t\ \Rightarrow\ v_3=k\odot v_2$$
-- 离散序列：固定符号序列 (ABA/ABC/等)。
-- 刚体/仿射：$$p_{t+1}=Q p_t + t,\quad R_{t+1}=Q R_t$$
-- 联动：多变量守恒/耦合（质心恒定、距离和恒定等）。
-
-## 规则清单（42 条：12 Simple + 19 Medium + 11 Complex）
-所有规则 meta 包含 `rule_id, rule_group(R1/R2/R3), difficulty, K_R, involved_indices, base_attrs_used, derived_funcs, pattern_type, pattern_params, v1/v2/v3`。
-
-### R1 基本属性理解推理（17 条）
+### R1 固有属性感知
 - **R1-1 等差统一缩放**：$$\text{size}_2-\text{size}_1=\Delta,\ \text{size}_3=2\text{size}_2-\text{size}_1$$
 - **R1-2 尺度轴置换循环**：$$(r_x,r_y,r_z)\to(r_y,r_z,r_x)\to(r_z,r_x,r_y)$$
 - **R1-3 固定轴旋转**：$$R_{t+1}=R_t\cdot\text{Rot}(\hat{u},\theta)$$
@@ -76,7 +85,7 @@ output/meta.json  # 所有题目的 meta 列表
 - **R1-16 距离密度倒数**：距离越近密度变化越剧烈
 - **R1-17 几何体个数变化**：不同形状的数量按等差增加
 
-### R2 多属性空间关系推理（R2-1–R2-14）
+### R2 显式拓扑推理
 - **R2-1 成对距离等比**：$$\text{dist}_2=k\text{dist}_1,\ \text{dist}_3=k\text{dist}_2$$
 - **R2-2 各向异性等比拉伸**：$$r_{t+1}=r_t\odot s,\ s_{axis}=k,\ s_{\text{others}}=\tfrac{1}{\sqrt{k}}\ \Rightarrow\ \text{vol 保持}$$
 - **R2-3 方向旋转等差**：$$\angle(\text{dir}_t,\text{dir}_{t+1})=\theta,\ \text{dist}\ \text{恒定}$$
@@ -92,7 +101,7 @@ output/meta.json  # 所有题目的 meta 列表
 - **R2-13 易位尺寸转换**：不同形状的尺寸变化按形状延续。
 - **R2-14 易位密度转换**：不同形状的密度变化按形状延续。
 
-### R3 多物体构型推理（R3-1–R3-11）
+### R3 隐式结构推理
 - **R3-1 三对象面积等差**：$$\text{area}_3=2\text{area}_2-\text{area}_1$$（允许 $\Delta=0$）
 - **R3-2 排序模式循环**：$$\text{ord}_x(S_1),\text{ord}_x(S_2),\text{ord}_x(S_3)\ \text{按固定置换}$$
 - **R3-3 距离集合等比**：左右独立等比缩放（$k_L,k_R$ 允许为 1）
@@ -105,13 +114,5 @@ output/meta.json  # 所有题目的 meta 列表
 - **R3-10 多对象形状变化**：多对象形状按位置延续转换（直线/三角形/矩形/五角星）
 - **R3-11 正弦位置转换**：位置沿正弦采样点连续滑动（45°倍数/0°）
 
-
-
-## 目录结构
-- `main.py`：CLI 入口与模式选择
-- `raven3d/scene.py`：`ObjectState`/`Scene` 多物体采样
-- `raven3d/rules/`：42 条规则（按 simple/medium/complex 划分）
-- `raven3d/dataset.py`：样本生成与 meta 写出
-- `program.md`：实施要求
-
-扩展新规则时可复用 `rules/utils.py` 中的派生函数与 meta 构建工具。
+### R4 抽象逻辑演化
+具体规则待定
