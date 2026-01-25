@@ -22,7 +22,7 @@ def parse_args() -> argparse.Namespace:
         type=str.lower,
         default="main",
         choices=list_available_modes(),
-        help="Rule preset: main / r1-only / r2-only / r3-only / all-minus-r1 / all-minus-r2 / all-minus-r3",
+        help="Rule preset: main / r1-only / r2-only / r3-only / r4-only / all-minus-r1 / all-minus-r2 / all-minus-r3 / all-minus-r4",
     )
     parser.add_argument(
         "--rules",
