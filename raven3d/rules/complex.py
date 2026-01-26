@@ -532,7 +532,7 @@ class R3_6PolygonAreaConstant(Rule):
 @dataclass
 class R3_7PositionCycle(Rule):
     def __init__(self) -> None:
-        super().__init__("R3-7", RuleDifficulty.COMPLEX, "多对象位置轮换", "不同形状沿结构按步长轮换")
+        super().__init__("R3-7", RuleDifficulty.COMPLEX, "多对象位置轮换", "球体沿结构按步长轮换")
 
     def sample_params(self, rng) -> Dict:
         count = int(rng.integers(3, 5))
@@ -570,35 +570,42 @@ class R3_7PositionCycle(Rule):
         if step >= count:
             step = count - 1
         positions, layout_name = self._layout_positions(count)
-        rot_angles = rng.uniform(-math.pi / 6, math.pi / 6, size=3)
+        base_rot = rng.uniform(-math.pi / 6, math.pi / 6, size=3)
         scale = float(rng.uniform(0.9, 1.1))
-        rot = rotation_matrix(rot_angles)
+        rot = rotation_matrix(base_rot)
         positions = [scale * (rot @ p) for p in positions]
-        shapes = rng.choice(SHAPES, size=count, replace=False).tolist()
-        objs = [random_object(rng, shape=shape) for shape in shapes]
+        objs = [random_object(rng, shape="sphere") for _ in range(count)]
+        size_factors = self._distinct_size_factors(rng, count)
+        for obj, factor in zip(objs, size_factors):
+            obj.r = obj.r * factor
         involved = list(range(count))
         step = step if direction == "cw" else -step
 
-        def build_frame(offset: int) -> List:
+        frame_angles = [float(rng.uniform(-math.pi / 4, math.pi / 4)) for _ in range(3)]
+        if max(frame_angles) - min(frame_angles) < math.pi / 12:
+            frame_angles[1] = float(frame_angles[1] + math.pi / 6)
+        frame_rots = [rotation_matrix(np.array([0.0, 0.0, a])) for a in frame_angles]
+
+        def build_frame(offset: int, rot_m: np.ndarray) -> List:
             arranged = clone_objects(objs)
             for idx, obj in enumerate(arranged):
-                obj.p = positions[(idx + offset) % count]
+                obj.p = rot_m @ positions[(idx + offset) % count]
             return arranged
 
-        def shapes_in_positions(offset: int) -> List[str]:
-            return [shapes[(j - offset) % count] for j in range(count)]
+        def index_in_positions(offset: int) -> List[int]:
+            return [int((j - offset) % count) for j in range(count)]
 
-        a_objs = build_frame(0)
-        b_objs = build_frame(step)
-        c_objs = build_frame(2 * step)
+        a_objs = build_frame(0, frame_rots[0])
+        b_objs = build_frame(step, frame_rots[1])
+        c_objs = build_frame(2 * step, frame_rots[2])
         scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
-        v = [shapes_in_positions(0), shapes_in_positions(step), shapes_in_positions(2 * step)]
+        v = [index_in_positions(0), index_in_positions(step), index_in_positions(2 * step)]
         meta = build_rule_meta(
             self,
             "R3",
             3,
             involved,
-            ["p", "s"],
+            ["p"],
             ["position_cycle"],
             "cyclic",
             {
@@ -606,13 +613,84 @@ class R3_7PositionCycle(Rule):
                 "count": count,
                 "step": abs(step),
                 "layout": layout_name,
-                "rotation_euler": rot_angles.tolist(),
+                "rotation_euler": base_rot.tolist(),
+                "frame_rot_z": frame_angles,
                 "scale": scale,
+                "size_factors": size_factors,
             },
             v,
             scenes,
         )
         return scenes[0], scenes[1], scenes[2], meta
+
+    def make_distractors(self, scene_c: Scene, rng, meta: Dict) -> Tuple[list[Scene], list[str]]:
+        if not scene_c.objects:
+            return [], []
+        count = len(scene_c.objects)
+        if count < 3:
+            return [], []
+        step = int(meta.get("pattern_params", {}).get("step", 1))
+        if step <= 0:
+            step = 1
+        if step >= count:
+            step = count - 1
+
+        center = centroid(scene_c.objects)
+        angles = [math.atan2(o.p[1] - center[1], o.p[0] - center[0]) for o in scene_c.objects]
+        order = [idx for idx, _ in sorted(enumerate(angles), key=lambda kv: kv[1])]
+        positions = [scene_c.objects[i].p.copy() for i in order]
+
+        def shift_assign(offset: int) -> Scene:
+            arranged = clone_objects(scene_c.objects)
+            for k, obj_idx in enumerate(order):
+                arranged[obj_idx].p = positions[(k + offset) % count]
+            return scene_from_objects(arranged)
+
+        wrong_step = 1 if step != 1 else 2
+        wrong_step = min(wrong_step, count - 1)
+        reverse_step = (-step) % count
+
+        def stretch_y(scale: float) -> Scene:
+            arranged = clone_objects(scene_c.objects)
+            for obj in arranged:
+                vec = obj.p - center
+                vec[1] *= scale
+                obj.p = center + vec
+            return scene_from_objects(arranged)
+
+        distractors = [shift_assign(wrong_step)]
+        reasons = ["轮换步长错误"]
+        if reverse_step != wrong_step:
+            distractors.append(shift_assign(reverse_step))
+            reasons.append("轮换方向错误")
+        else:
+            arranged = clone_objects(scene_c.objects)
+            if count >= 2:
+                a_idx = order[0]
+                b_idx = order[1]
+                tmp = arranged[a_idx].p.copy()
+                arranged[a_idx].p = arranged[b_idx].p.copy()
+                arranged[b_idx].p = tmp
+            distractors.append(scene_from_objects(arranged))
+            reasons.append("位置交换错误")
+        distractors.append(stretch_y(1.4))
+        reasons.append("结构被拉伸，位置关系破坏")
+        return distractors, reasons
+
+    @staticmethod
+    def _distinct_size_factors(rng, count: int) -> List[float]:
+        factors: List[float] = []
+        attempts = 0
+        while len(factors) < count and attempts < 200:
+            candidate = float(rng.uniform(0.7, 1.4))
+            if all(abs(candidate - f) > 0.15 for f in factors):
+                factors.append(candidate)
+            attempts += 1
+        if len(factors) < count:
+            base = float(rng.uniform(0.85, 1.2))
+            step = 0.18
+            factors = [max(base + step * (i - (count - 1) / 2), 0.3) for i in range(count)]
+        return factors
 
 
 @dataclass

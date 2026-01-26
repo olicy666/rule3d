@@ -1141,17 +1141,21 @@ class R3_1VolumeSumConserved(Rule):
         if max_total < min_total:
             min_total = max_total * 0.5
         if min_total <= 0:
-            min_total = max_total * 0.2
-        return float(rng.uniform(min_total, max_total))
+            min_total = max_total * 0.4  # 从 0.2 增加到 0.4，确保最小变化量更大
+        # 倾向于选择较大的变化量，让变化更明显
+        # 使用 0.6-1.0 的范围，确保选择较大的值（至少是 60% 到最大值之间）
+        u = float(rng.uniform(0.6, 1.0))
+        return float(min_total + (max_total - min_total) * u)
 
     def _sample_deltas(self, base_vols: np.ndarray, params: Dict, rng) -> np.ndarray:
         mode = params.get("mode", "flat")
         if mode == "flat":
             return np.zeros(3, dtype=float)
 
-        max_down_ratio = 0.35
-        max_up_ratio = 0.7
-        min_step_ratio = 0.15
+        # 增大体积变化比例，让变化更明显
+        max_down_ratio = 0.65  # 从 0.35 增加到 0.65，允许更大的减少
+        max_up_ratio = 1.2     # 从 0.7 增加到 1.2，允许更大的增加
+        min_step_ratio = 0.35  # 从 0.15 增加到 0.35，确保最小变化量也更大
 
         indices = [0, 1, 2]
         if mode == "one-down-two-up":
