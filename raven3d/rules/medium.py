@@ -1635,7 +1635,7 @@ class R1_13DensitySizeCoupled(Rule):
 
     def sample_params(self, rng) -> Dict:
         scale_up = float(rng.uniform(3.0, 4.2))
-        scale_down = float(rng.uniform(0.55, 0.75))
+        scale_down = float(rng.uniform(0.75, 0.9))
         factors = [scale_up, scale_down] if rng.random() < 0.5 else [scale_down, scale_up]
         return {"density_factors": factors}
 
@@ -1648,11 +1648,11 @@ class R1_13DensitySizeCoupled(Rule):
         objs[0].p = np.array([-base_offset, base_y, base_z])
         objs[1].p = np.array([base_offset, -base_y, -base_z])
 
-        factors = [float(f) for f in params.get("density_factors", [3.2, 0.6])]
+        factors = [float(f) for f in params.get("density_factors", [3.2, 0.8])]
         if len(factors) != 2:
-            factors = [3.2, 0.6]
-        base_low = float(rng.uniform(0.7, 0.9))
-        base_high = float(rng.uniform(1.4, 1.7))
+            factors = [3.2, 0.8]
+        base_low = float(rng.uniform(0.9, 1.1))
+        base_high = base_low * 2.0
         if factors[0] >= factors[1]:
             objs[0].density = base_high
             objs[1].density = base_low
