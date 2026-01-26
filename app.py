@@ -657,7 +657,7 @@ def render_exam() -> None:
             st.session_state.viewer_reset_nonce += 1
             st.rerun()
     with control_cols[1]:
-        show_big_view = st.checkbox("大视图", value=st.session_state.show_big_view, key="show_big_view")
+        show_big_view = st.checkbox("大视图", key="show_big_view")
 
     ref_cols = st.columns(2)
     reset_nonce = st.session_state.viewer_reset_nonce
