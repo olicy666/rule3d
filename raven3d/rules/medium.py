@@ -15,6 +15,7 @@ from .utils import (
     apply_scale,
     apply_translation,
     aspect_ratio,
+    approx_radius,
     axis,
     build_rule_meta,
     centroid,
@@ -85,16 +86,36 @@ class R2_1DistanceGeometric(Rule):
         count = int(rng.integers(3, 7))
         objs = [random_object(rng) for _ in range(count)]
         involved = [0, 1]
+        center = rng.uniform(-0.2, 0.2, size=3)
 
-        def place(distance: float):
+        r0 = approx_radius(objs[0])
+        r1 = approx_radius(objs[1])
+        min_dist = (r0 + r1) * 1.05
+        distances = [base, base * k, base * k * k]
+        min_current = min(distances)
+        if min_current < min_dist:
+            scale = min_dist / max(min_current, 1e-6)
+            distances = [d * scale for d in distances]
+        positions = []
+        for distance in distances:
+            p0 = center - direction_vec * distance / 2
+            p1 = center + direction_vec * distance / 2
+            positions.append((p0, p1))
+
+        objs[0].p = positions[0][0]
+        objs[1].p = positions[0][1]
+        r0 = approx_radius(objs[0])
+        r1 = approx_radius(objs[1])
+        reserved = [(p0, r0) for p0, _ in positions] + [(p1, r1) for _, p1 in positions]
+        place_extras_apart(objs, rng, fixed_count=2, reserved=reserved)
+
+        def place(p0: np.ndarray, p1: np.ndarray):
             placed = clone_objects(objs)
-            placed[0].p = -direction_vec * distance / 2
-            placed[1].p = direction_vec * distance / 2
-            place_extras_apart(placed, rng, fixed_count=2)
+            placed[0].p = p0
+            placed[1].p = p1
             return placed
 
-        distances = [base, base * k, base * k * k]
-        scenes_objs = [place(d) for d in distances]
+        scenes_objs = [place(p0, p1) for p0, p1 in positions]
         scenes = [scene_from_objects(x) for x in scenes_objs]
         v = distances
         meta = build_rule_meta(
@@ -121,7 +142,6 @@ class R2_1DistanceGeometric(Rule):
             placed = clone_objects(scene_c.objects)
             placed[0].p = origin.copy()
             placed[1].p = origin + dir_vec * distance
-            place_extras_apart(placed, rng, fixed_count=2)
             return scene_from_objects(placed)
 
         alt_dir = _unit_vector(rng)
@@ -153,6 +173,7 @@ class R2_3DirectionRotate(Rule):
         count = int(rng.integers(3, 7))
         objs = [random_object(rng) for _ in range(count)]
         involved = [0, 1]
+        center = rng.uniform(-0.2, 0.2, size=3)
         # Use rotation around z axis for direction updates.
         base_dir = _unit_vector(rng)
         base_dir[2] = 0  # keep planar
@@ -162,16 +183,34 @@ class R2_3DirectionRotate(Rule):
             rot = np.array([[math.cos(angle), -math.sin(angle), 0], [math.sin(angle), math.cos(angle), 0], [0, 0, 1]])
             return rot @ base_dir
 
+        r0 = approx_radius(objs[0])
+        r1 = approx_radius(objs[1])
+        min_dist = (r0 + r1) * 1.05
+        if base < min_dist:
+            base = min_dist
+
         dirs = [rotate_dir(0), rotate_dir(theta), rotate_dir(2 * theta)]
 
-        def place(dir_vec: np.ndarray):
+        positions = []
+        for d in dirs:
+            p0 = center
+            p1 = center + d * base
+            positions.append((p0, p1))
+
+        objs[0].p = positions[0][0]
+        objs[1].p = positions[0][1]
+        r0 = approx_radius(objs[0])
+        r1 = approx_radius(objs[1])
+        reserved = [(p0, r0) for p0, _ in positions] + [(p1, r1) for _, p1 in positions]
+        place_extras_apart(objs, rng, fixed_count=2, reserved=reserved)
+
+        def place(p0: np.ndarray, p1: np.ndarray):
             placed = clone_objects(objs)
-            placed[0].p = np.zeros(3)
-            placed[1].p = dir_vec * base
-            place_extras_apart(placed, rng, fixed_count=2)
+            placed[0].p = p0
+            placed[1].p = p1
             return placed
 
-        scenes_objs = [place(d) for d in dirs]
+        scenes_objs = [place(p0, p1) for p0, p1 in positions]
         scenes = [scene_from_objects(x) for x in scenes_objs]
         v = [d.tolist() for d in dirs]
         meta = build_rule_meta(
@@ -207,7 +246,6 @@ class R2_3DirectionRotate(Rule):
             placed = clone_objects(scene_c.objects)
             placed[0].p = origin.copy()
             placed[1].p = origin + dir_vec * distance
-            place_extras_apart(placed, rng, fixed_count=2)
             return scene_from_objects(placed)
 
         dist_far = base_dist * float(rng.uniform(1.6, 2.1))

@@ -14,6 +14,7 @@ from .utils import (
     apply_scale,
     apply_translation,
     aspect_ratio,
+    approx_radius,
     axis,
     build_rule_meta,
     centroid,
@@ -244,7 +245,6 @@ class R2_2AnisotropicGeometric(Rule):
         involved = [0]
         factor = float(params["factor"])
         axis_idx = int(params["axis"])
-        place_extras_apart(objs, rng, fixed_count=1)
         base = objs[0]
         squeeze = 1.0 / math.sqrt(factor)
         scale = np.ones(3)
@@ -253,14 +253,15 @@ class R2_2AnisotropicGeometric(Rule):
             if i != axis_idx:
                 scale[i] = squeeze
         alt = apply_scale(base, scale)
+        alt2 = apply_scale(alt, scale)
+        max_radius = max(approx_radius(base), approx_radius(alt), approx_radius(alt2))
+        place_extras_apart(objs, rng, fixed_count=1, reserved=[(base.p, max_radius)])
 
         a_objs = clone_objects(objs)
         b_objs = clone_objects(objs)
         b_objs[0] = alt
-        place_extras_apart(b_objs, rng, fixed_count=1)
         c_objs = clone_objects(b_objs)
         c_objs[0] = apply_scale(b_objs[0], scale)
-        place_extras_apart(c_objs, rng, fixed_count=1)
         scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
         v = [aspect_ratio(o) for o in [a_objs[0], b_objs[0], c_objs[0]]]
         meta = build_rule_meta(
@@ -285,7 +286,6 @@ class R2_2AnisotropicGeometric(Rule):
         def with_scale(scale: np.ndarray) -> Scene:
             objs = clone_objects(scene_c.objects)
             objs[0] = apply_scale(objs[0], scale)
-            place_extras_apart(objs, rng, fixed_count=1)
             return scene_from_objects(objs)
 
         squeeze = 1.0 / math.sqrt(factor)

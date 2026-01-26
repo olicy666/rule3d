@@ -86,15 +86,24 @@ def place_extras_apart(
     low: float = -0.7,
     high: float = 0.7,
     max_attempts: int = 40,
+    reserved: Sequence[tuple[np.ndarray, float]] | None = None,
 ) -> None:
     if len(objs) <= fixed_count:
         return
+    reserved = list(reserved) if reserved else []
     for idx in range(fixed_count, len(objs)):
         placed = False
         current = objs[idx].p.copy()
         for attempt in range(max_attempts):
             candidate = current if attempt == 0 else random_center(rng, low=low, high=high)
             ok = True
+            for pos, radius in reserved:
+                target = (approx_radius(objs[idx]) + float(radius)) * min_sep_ratio
+                if float(np.linalg.norm(candidate - pos)) < target:
+                    ok = False
+                    break
+            if not ok:
+                continue
             for j in range(idx):
                 target = (approx_radius(objs[idx]) + approx_radius(objs[j])) * min_sep_ratio
                 if float(np.linalg.norm(candidate - objs[j].p)) < target:
