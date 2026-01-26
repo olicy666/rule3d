@@ -680,7 +680,6 @@ def render_exam() -> None:
         selected = st.multiselect(
             "显示哪些点云",
             view_options,
-            default=st.session_state.big_view_selection,
             key="big_view_selection",
         )
         label_to_path = {
