@@ -23,6 +23,7 @@ from .utils import (
     dist,
     init_objects,
     order_indices_x,
+    place_extras_apart,
     random_object,
     scene_from_objects,
     size,
@@ -81,14 +82,16 @@ class R2_1DistanceGeometric(Rule):
     def generate_triplet(self, params, rng):
         k, base = params["k"], params["base"]
         direction_vec = _unit_vector(rng)
-        objs = init_objects(rng, 2, m=2)
+        count = int(rng.integers(3, 7))
+        objs = [random_object(rng) for _ in range(count)]
         involved = [0, 1]
 
         def place(distance: float):
-            obj_a, obj_b = clone_objects(objs)
-            obj_a.p = -direction_vec * distance / 2
-            obj_b.p = direction_vec * distance / 2
-            return [obj_a, obj_b]
+            placed = clone_objects(objs)
+            placed[0].p = -direction_vec * distance / 2
+            placed[1].p = direction_vec * distance / 2
+            place_extras_apart(placed, rng, fixed_count=2)
+            return placed
 
         distances = [base, base * k, base * k * k]
         scenes_objs = [place(d) for d in distances]
@@ -115,10 +118,11 @@ class R2_1DistanceGeometric(Rule):
         ]
 
         def place(dir_vec: np.ndarray, distance: float) -> Scene:
-            o0, o1 = clone_objects(scene_c.objects)
-            o0.p = origin.copy()
-            o1.p = origin + dir_vec * distance
-            return scene_from_objects([o0, o1])
+            placed = clone_objects(scene_c.objects)
+            placed[0].p = origin.copy()
+            placed[1].p = origin + dir_vec * distance
+            place_extras_apart(placed, rng, fixed_count=2)
+            return scene_from_objects(placed)
 
         alt_dir = _unit_vector(rng)
         distractors = [
@@ -140,13 +144,14 @@ class R2_3DirectionRotate(Rule):
         super().__init__("R2-3", RuleDifficulty.MEDIUM, "方向旋转等差", "dir 旋转, dist 保持")
 
     def sample_params(self, rng) -> Dict:
-        theta = float(rng.uniform(math.pi / 12, math.pi / 6))
+        theta = float(rng.uniform(math.pi / 4, math.pi / 2))
         base = float(rng.uniform(0.7, 1.0))
         return {"theta": theta, "base": base}
 
     def generate_triplet(self, params, rng):
         theta, base = params["theta"], params["base"]
-        objs = init_objects(rng, 2, m=2)
+        count = int(rng.integers(3, 7))
+        objs = [random_object(rng) for _ in range(count)]
         involved = [0, 1]
         # Use rotation around z axis for direction updates.
         base_dir = _unit_vector(rng)
@@ -160,10 +165,11 @@ class R2_3DirectionRotate(Rule):
         dirs = [rotate_dir(0), rotate_dir(theta), rotate_dir(2 * theta)]
 
         def place(dir_vec: np.ndarray):
-            o0, o1 = clone_objects(objs)
-            o0.p = np.zeros(3)
-            o1.p = dir_vec * base
-            return [o0, o1]
+            placed = clone_objects(objs)
+            placed[0].p = np.zeros(3)
+            placed[1].p = dir_vec * base
+            place_extras_apart(placed, rng, fixed_count=2)
+            return placed
 
         scenes_objs = [place(d) for d in dirs]
         scenes = [scene_from_objects(x) for x in scenes_objs]
@@ -198,10 +204,11 @@ class R2_3DirectionRotate(Rule):
             return rot @ base_dir
 
         def place(dir_vec: np.ndarray, distance: float) -> Scene:
-            o0, o1 = clone_objects(scene_c.objects)
-            o0.p = origin.copy()
-            o1.p = origin + dir_vec * distance
-            return scene_from_objects([o0, o1])
+            placed = clone_objects(scene_c.objects)
+            placed[0].p = origin.copy()
+            placed[1].p = origin + dir_vec * distance
+            place_extras_apart(placed, rng, fixed_count=2)
+            return scene_from_objects(placed)
 
         dist_far = base_dist * float(rng.uniform(1.6, 2.1))
         dist_near = base_dist * float(rng.uniform(0.4, 0.7))

@@ -78,6 +78,39 @@ def _separate_objects_light_contact(
             break
 
 
+def place_extras_apart(
+    objs: Sequence[ObjectState],
+    rng: np.random.Generator,
+    fixed_count: int = 2,
+    min_sep_ratio: float = 1.05,
+    low: float = -0.7,
+    high: float = 0.7,
+    max_attempts: int = 40,
+) -> None:
+    if len(objs) <= fixed_count:
+        return
+    for idx in range(fixed_count, len(objs)):
+        placed = False
+        current = objs[idx].p.copy()
+        for attempt in range(max_attempts):
+            candidate = current if attempt == 0 else random_center(rng, low=low, high=high)
+            ok = True
+            for j in range(idx):
+                target = (approx_radius(objs[idx]) + approx_radius(objs[j])) * min_sep_ratio
+                if float(np.linalg.norm(candidate - objs[j].p)) < target:
+                    ok = False
+                    break
+            if ok:
+                objs[idx].p = candidate
+                placed = True
+                break
+        if not placed:
+            direction = rng.normal(size=3)
+            direction = direction / (np.linalg.norm(direction) + 1e-9)
+            push = approx_radius(objs[idx]) * 2.0
+            objs[idx].p = objs[idx].p + direction * push
+
+
 def clone_objects(objs: Sequence[ObjectState]) -> List[ObjectState]:
     return [o.copy() for o in objs]
 
