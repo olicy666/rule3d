@@ -39,10 +39,10 @@ def random_object(rng: np.random.Generator, shape: str | None = None) -> ObjectS
 
 
 def init_objects(rng: np.random.Generator, k: int, m: int | None = None) -> List[ObjectState]:
-    """Create M objects (2 or 3) ensuring M >= K."""
+    """Create M objects ensuring M >= K."""
     if m is None:
         m = max(k, int(rng.integers(2, 4)))
-    m = min(max(m, k, 2), 3)
+    m = min(max(m, k, 2), 8)
     objs = [random_object(rng) for _ in range(m)]
     _separate_objects_light_contact(objs, rng)
     return objs

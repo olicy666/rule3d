@@ -334,12 +334,11 @@ class R2_9AcceleratedRotation(Rule):
         super().__init__("R2-9", RuleDifficulty.MEDIUM, "加速旋转", "旋转幅度递增")
 
     def sample_params(self, rng) -> Dict:
-        obj_count = int(rng.integers(1, 4))
+        obj_count = int(rng.integers(3, 7))
         axis_idx = int(rng.integers(0, 3))
         sign = 1 if rng.random() < 0.5 else -1
         delta1 = float(rng.uniform(math.pi / 4, math.pi / 2)) * sign
-        accel = float(rng.uniform(1.35, 1.75))
-        delta2 = delta1 * accel
+        delta2 = delta1 * 2.0
         return {"count": obj_count, "axis": axis_idx, "delta1": delta1, "delta2": delta2}
 
     def generate_triplet(self, params, rng):
@@ -1021,15 +1020,18 @@ class R2_5AngleArithmetic(Rule):
 
     def generate_triplet(self, params, rng):
         base_angle, delta = params["base_angle"], params["delta"]
-        objs = init_objects(rng, 2, m=2)
+        count = int(rng.integers(3, 7))
+        objs = init_objects(rng, 2, m=count)
         involved = [0, 1]
-        axis_rot = np.array([0.0, base_angle, 0.0])
+        axis_dir = _unit_vector(rng)
+        base_rot = axis_dir * base_angle
+        delta_rot = axis_dir * delta
         a_objs = clone_objects(objs)
-        a_objs[1] = apply_rotation(a_objs[1], axis_rot)
+        a_objs[1] = apply_rotation(a_objs[1], base_rot)
         b_objs = clone_objects(a_objs)
-        b_objs[1] = apply_rotation(b_objs[1], np.array([0.0, delta, 0.0]))
+        b_objs[1] = apply_rotation(b_objs[1], delta_rot)
         c_objs = clone_objects(b_objs)
-        c_objs[1] = apply_rotation(c_objs[1], np.array([0.0, delta, 0.0]))
+        c_objs[1] = apply_rotation(c_objs[1], delta_rot)
         scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
         v = [ang(*pair) for pair in [[a_objs[0], a_objs[1]], [b_objs[0], b_objs[1]], [c_objs[0], c_objs[1]]]]
         meta = build_rule_meta(
