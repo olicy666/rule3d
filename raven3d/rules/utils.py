@@ -78,6 +78,31 @@ def _separate_objects_light_contact(
             break
 
 
+def _separate_objects_no_contact(objs: Sequence[ObjectState], rng: np.random.Generator, gap: float = 0.06) -> None:
+    if len(objs) < 2:
+        return
+    for _ in range(20):
+        moved = False
+        for i in range(len(objs)):
+            for j in range(i + 1, len(objs)):
+                delta = objs[i].p - objs[j].p
+                dist = float(np.linalg.norm(delta))
+                target = approx_radius(objs[i]) + approx_radius(objs[j]) + gap
+                if dist >= target:
+                    continue
+                if dist < 1e-6:
+                    direction = rng.normal(size=3)
+                    direction = direction / (np.linalg.norm(direction) + 1e-9)
+                else:
+                    direction = delta / (dist + 1e-9)
+                shift = 0.5 * (target - dist)
+                objs[i].p = objs[i].p + direction * shift
+                objs[j].p = objs[j].p - direction * shift
+                moved = True
+        if not moved:
+            break
+
+
 def place_extras_apart(
     objs: Sequence[ObjectState],
     rng: np.random.Generator,

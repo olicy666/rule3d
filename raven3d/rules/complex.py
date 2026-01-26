@@ -37,6 +37,7 @@ from .utils import (
     size,
     switch_shape,
     symmetry_flag,
+    _separate_objects_no_contact,
 )
 from ..geometry import rotation_matrix
 from ..scene import Scene, ObjectState
@@ -63,26 +64,6 @@ def _spread_objects(objs: Sequence[ObjectState], rng) -> None:
                 if dist < min_sep:
                     direction_vec = _unit_vector(rng) if dist < 1e-6 else delta / dist
                     shift = 0.5 * (min_sep - dist)
-                    objs[i].p = objs[i].p - direction_vec * shift
-                    objs[j].p = objs[j].p + direction_vec * shift
-                    moved = True
-        if not moved:
-            break
-
-
-def _separate_objects_no_contact(objs: Sequence[ObjectState], rng, gap: float = 0.06) -> None:
-    if len(objs) < 2:
-        return
-    for _ in range(12):
-        moved = False
-        for i in range(len(objs)):
-            for j in range(i + 1, len(objs)):
-                delta = objs[j].p - objs[i].p
-                dist = float(np.linalg.norm(delta))
-                min_dist = approx_radius(objs[i]) + approx_radius(objs[j]) + gap
-                if dist < min_dist:
-                    direction_vec = _unit_vector(rng) if dist < 1e-6 else delta / dist
-                    shift = 0.5 * (min_dist - dist)
                     objs[i].p = objs[i].p - direction_vec * shift
                     objs[j].p = objs[j].p + direction_vec * shift
                     moved = True

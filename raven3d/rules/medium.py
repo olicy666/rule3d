@@ -7,7 +7,6 @@ from typing import Dict, List, Sequence, Tuple
 import numpy as np
 
 from .base import Rule, RuleDifficulty
-from .complex import _separate_objects_no_contact
 from .utils import (
     SHAPES,
     ang,
@@ -30,6 +29,7 @@ from .utils import (
     scene_from_objects,
     size,
     symmetry_flag,
+    _separate_objects_no_contact,
     touch,
 )
 from ..scene import Scene
