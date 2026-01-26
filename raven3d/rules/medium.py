@@ -1470,9 +1470,7 @@ class R1_11AttributeSwap(Rule):
         base_z = float(rng.uniform(-0.2, 0.2))
         objs[0].p = np.array([-base_offset, base_y, base_z])
         objs[1].p = np.array([base_offset, -base_y, -base_z])
-        if objs[0].shape == objs[1].shape:
-            options = [s for s in SHAPES if s != objs[0].shape]
-            objs[1].shape = str(rng.choice(options))
+        objs[1].shape = objs[0].shape
         size_a = size(objs[0])
         size_b = size(objs[1])
         min_ratio = 2.2
@@ -1632,7 +1630,7 @@ class R1_13DensitySizeCoupled(Rule):
 
     def sample_params(self, rng) -> Dict:
         scale_up = float(rng.uniform(3.0, 4.2))
-        scale_down = float(rng.uniform(0.22, 0.4))
+        scale_down = float(rng.uniform(0.55, 0.75))
         factors = [scale_up, scale_down] if rng.random() < 0.5 else [scale_down, scale_up]
         return {"density_factors": factors}
 
@@ -1645,9 +1643,9 @@ class R1_13DensitySizeCoupled(Rule):
         objs[0].p = np.array([-base_offset, base_y, base_z])
         objs[1].p = np.array([base_offset, -base_y, -base_z])
 
-        factors = [float(f) for f in params.get("density_factors", [3.2, 0.3])]
+        factors = [float(f) for f in params.get("density_factors", [3.2, 0.6])]
         if len(factors) != 2:
-            factors = [3.2, 0.3]
+            factors = [3.2, 0.6]
         scale_factors = [f ** (1.0 / 3.0) for f in factors]
 
         def step_objs(src):
