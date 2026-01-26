@@ -1410,8 +1410,28 @@ class R4_3NodeFusionEvolution(Rule):
         super().__init__("R4-3", RuleDifficulty.COMPLEX, "节点融合演化", "节点按 2->1 融合并延续")
 
     def sample_params(self, rng) -> Dict:
-        count = int(rng.integers(1, 7))
+        count = int(rng.integers(3, 7))
         return {"count": count}
+
+    @staticmethod
+    def _build_shapes(count: int, rng) -> List[str]:
+        max_pairs = min(3, count // 2)
+        pair_target = int(rng.integers(1, max_pairs + 1))
+        dup_count_map = {1: 3, 2: 4, 3: 6}
+        dup_count = dup_count_map[pair_target]
+        fusion_shape = str(rng.choice(SHAPES))
+
+        shapes = [fusion_shape] * dup_count
+        remaining = count - dup_count
+        if remaining > 0:
+            other_shapes = [s for s in SHAPES if s != fusion_shape]
+            if remaining > len(other_shapes):
+                extra = rng.choice(other_shapes, size=remaining, replace=True).tolist()
+            else:
+                extra = rng.choice(other_shapes, size=remaining, replace=False).tolist()
+            shapes.extend(extra)
+        rng.shuffle(shapes)
+        return shapes
 
     @staticmethod
     def _fuse_objects(objs: Sequence, rng) -> List:
@@ -1421,24 +1441,29 @@ class R4_3NodeFusionEvolution(Rule):
 
         fused = []
         used = set()
-        for indices in by_shape.values():
-            rng.shuffle(indices)
-            for i in range(0, len(indices) - 1, 2):
-                idx_a, idx_b = int(indices[i]), int(indices[i + 1])
-                if idx_a in used or idx_b in used:
-                    continue
-                used.add(idx_a)
-                used.add(idx_b)
-                obj_a = objs[idx_a]
-                obj_b = objs[idx_b]
-                base = obj_a.copy()
-                target = size(obj_a) + size(obj_b)
-                cur = max(size(base), 1e-6)
-                scale = (target / cur) ** (1 / 3)
-                base = apply_scale(base, scale)
-                base.p = (obj_a.p + obj_b.p) / 2.0
-                base.rotation = rng.uniform(-math.pi / 4, math.pi / 4, size=3)
-                fused.append(base)
+        candidates = [shape for shape, indices in by_shape.items() if len(indices) >= 2]
+        if not candidates:
+            return [obj.copy() for obj in objs]
+        preferred = [shape for shape in candidates if len(by_shape[shape]) >= 3]
+        fuse_shape = str(rng.choice(preferred if preferred else candidates))
+        indices = by_shape[fuse_shape]
+        rng.shuffle(indices)
+        for i in range(0, len(indices) - 1, 2):
+            idx_a, idx_b = int(indices[i]), int(indices[i + 1])
+            if idx_a in used or idx_b in used:
+                continue
+            used.add(idx_a)
+            used.add(idx_b)
+            obj_a = objs[idx_a]
+            obj_b = objs[idx_b]
+            base = obj_a.copy()
+            target = size(obj_a) + size(obj_b)
+            cur = max(size(base), 1e-6)
+            scale = (target / cur) ** (1 / 3)
+            base = apply_scale(base, scale)
+            base.p = (obj_a.p + obj_b.p) / 2.0
+            base.rotation = rng.uniform(-math.pi / 4, math.pi / 4, size=3)
+            fused.append(base)
 
         for idx, obj in enumerate(objs):
             if idx not in used:
@@ -1449,11 +1474,9 @@ class R4_3NodeFusionEvolution(Rule):
         return fused
 
     def generate_triplet(self, params, rng):
-        count = int(params.get("count", 2))
+        count = max(3, int(params.get("count", 2)))
         objs = [random_object(rng) for _ in range(count)]
-        shapes = rng.choice(SHAPES, size=count, replace=True).tolist()
-        if count >= 2 and len(set(shapes)) == count:
-            shapes[-1] = shapes[0]
+        shapes = self._build_shapes(count, rng)
         for i, shape in enumerate(shapes):
             objs[i].shape = shape
         density_by_shape: Dict[str, float] = {}
@@ -1755,7 +1778,7 @@ class R4_5ContactInfection(Rule):
         scene_b = self._add_random(infected_b, rng, count=2)
 
         infected_c, source_c = self._infect(scene_b, attrs, rng)
-        scene_c = self._add_random(infected_c, rng, count=2)
+        scene_c = infected_c
 
         v = [len(scene_a.objects), len(scene_b.objects), len(scene_c.objects)]
         involved = list(range(len(scene_c.objects)))
@@ -1769,7 +1792,7 @@ class R4_5ContactInfection(Rule):
             "infection-evolution",
             {
                 "infect_attrs": attrs,
-                "added_each": 2,
+                "added_each": [2, 0],
                 "source_indices": [source_b, source_c],
             },
             v,
@@ -1827,8 +1850,7 @@ class R4_6AdvancedOrbitalRotation(Rule):
         super().__init__("R4-6", RuleDifficulty.COMPLEX, "进阶行星公转", "公转中心按相邻最大尺寸切换")
 
     def sample_params(self, rng) -> Dict:
-        count = int(rng.integers(4, 7))
-        return {"count": count}
+        return {"count": 3}
 
     @staticmethod
     def _unique_samples(rng, count: int, low: float, high: float, min_gap: float) -> List[float]:
@@ -1909,8 +1931,7 @@ class R4_6AdvancedOrbitalRotation(Rule):
         return Scene(objects=objs)
 
     def generate_triplet(self, params, rng):
-        count = int(params.get("count", 3))
-        count = max(4, count)
+        count = 3
         gap = 0.06
         for _ in range(40):
             objs = [random_object(rng) for _ in range(count)]
@@ -2309,21 +2330,28 @@ class R4_9SoftBodySqueeze(Rule):
     def _position_pressers(pressers: Sequence[ObjectState], sphere: ObjectState, rng) -> List[ObjectState]:
         """
         将挤压物体垂直堆叠在球体上方，像积木一样一个叠一个，确保接触但不穿模。
+        使用负间隙确保物体之间有接触。
         """
         placed = []
         # 计算球体顶部位置（球体中心 y + 球体半径 y）
+        # 对于轴对齐边界框，物体顶部 = p[1] + r[1]，底部 = p[1] - r[1]
         sphere_top_y = sphere.p[1] + sphere.r[1]
         
         # 当前堆叠的顶部位置
         current_top_y = sphere_top_y
         
+        # 使用小的负间隙确保物体之间有接触（稍微重叠）
+        contact_overlap = -0.02  # 负值表示重叠，确保接触
+        
         for i, obj in enumerate(pressers):
             # 计算物体在 y 方向的高度（r[1] 是 y 轴方向的半高）
-            obj_height = obj.r[1]
+            obj_half_height = obj.r[1]
             
-            # 物体中心 y 位置 = 当前堆叠顶部 + 物体高度
-            # 这样物体的底部刚好接触前一个物体（或球体）的顶部
-            obj_center_y = current_top_y + obj_height
+            # 物体底部应该接触前一个物体的顶部
+            # 物体底部 y = obj_center_y - obj_half_height
+            # 我们希望：obj_center_y - obj_half_height = current_top_y + contact_overlap
+            # 所以：obj_center_y = current_top_y + contact_overlap + obj_half_height
+            obj_center_y = current_top_y + contact_overlap + obj_half_height
             
             # X 和 Z 位置：可以稍微随机偏移，但保持在球体中心附近
             # 为了更真实，可以让物体稍微偏离中心，但不要太多
@@ -2339,8 +2367,8 @@ class R4_9SoftBodySqueeze(Rule):
             
             placed.append(new_obj)
             
-            # 更新堆叠顶部位置：当前物体顶部 = 物体中心 + 物体高度
-            current_top_y = obj_center_y + obj_height
+            # 更新堆叠顶部位置：当前物体顶部 = 物体中心 + 物体半高
+            current_top_y = obj_center_y + obj_half_height
         
         return placed
 

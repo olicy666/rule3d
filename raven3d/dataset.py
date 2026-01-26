@@ -141,15 +141,13 @@ class DatasetGenerator:
                 distractor_scenes.append(sc)
                 distractor_reasons.append(rs)
 
-        d_idx = 0
-        for i in range(len(candidate_points)):
-            if candidate_points[i] is not None:
-                continue
+        empty_indices = [i for i, pts in enumerate(candidate_points) if pts is None]
+        self.rng.shuffle(empty_indices)
+        for d_idx, slot_idx in enumerate(empty_indices):
             distractor_scene = distractor_scenes[d_idx]
             reason = distractor_reasons[d_idx] if d_idx < len(distractor_reasons) else "扰动候选"
-            d_idx += 1
-            candidate_points[i] = distractor_scene.sample_point_cloud(self.config.n_points)
-            candidate_reasons[i] = reason
+            candidate_points[slot_idx] = distractor_scene.sample_point_cloud(self.config.n_points)
+            candidate_reasons[slot_idx] = reason
 
         sample_dir = output_root / f"sample_{sample_index:06d}"
         ensure_dir(sample_dir)
