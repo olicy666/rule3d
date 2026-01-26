@@ -401,6 +401,8 @@ def reset_exam_state() -> None:
     st.session_state.viewer_reset_nonce = 0
     st.session_state.show_big_view = True
     st.session_state.big_view_selection = ["Ref1", "Ref2"]
+    for label in ["Ref1", "Ref2", "A", "B", "C", "D"]:
+        st.session_state.pop(f"big_view_{label}", None)
     for idx in range(TOTAL_QUESTIONS):
         st.session_state.pop(f"answer_{idx}", None)
 
@@ -677,11 +679,16 @@ def render_exam() -> None:
     if show_big_view:
         st.markdown("### 合并点云视图")
         view_options = ["Ref1", "Ref2", "A", "B", "C", "D"]
-        selected = st.multiselect(
-            "显示哪些点云",
-            view_options,
-            key="big_view_selection",
-        )
+        selected = []
+        cols = st.columns(len(view_options))
+        for col, label in zip(cols, view_options):
+            key = f"big_view_{label}"
+            default = label in st.session_state.big_view_selection
+            with col:
+                checked = st.checkbox(label, key=key, value=default)
+            if checked:
+                selected.append(label)
+        st.session_state.big_view_selection = selected
         label_to_path = {
             "Ref1": entry["ref1_path"],
             "Ref2": entry["ref2_path"],
