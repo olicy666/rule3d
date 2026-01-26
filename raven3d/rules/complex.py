@@ -1449,10 +1449,8 @@ class R4_3NodeFusionEvolution(Rule):
         fuse_shape = str(rng.choice(preferred if preferred else candidates))
         indices = by_shape[fuse_shape]
         rng.shuffle(indices)
-        for i in range(0, len(indices) - 1, 2):
-            idx_a, idx_b = int(indices[i]), int(indices[i + 1])
-            if idx_a in used or idx_b in used:
-                continue
+        if len(indices) >= 2:
+            idx_a, idx_b = int(indices[0]), int(indices[1])
             used.add(idx_a)
             used.add(idx_b)
             obj_a = objs[idx_a]
@@ -2352,7 +2350,7 @@ class R4_9SoftBodySqueeze(Rule):
     def _position_pressers(pressers: Sequence[ObjectState], sphere: ObjectState, rng) -> List[ObjectState]:
         """
         将挤压物体垂直堆叠在球体上方，像积木一样一个叠一个，确保接触但不穿模。
-        使用 AABB 边界框来精确计算接触位置。
+        使用 AABB 边界框来精确计算接触位置，使用较大的重叠确保真正接触。
         """
         placed = []
         # 根据 aabb 函数：half = r / 2.0, min = p - half, max = p + half
@@ -2365,24 +2363,27 @@ class R4_9SoftBodySqueeze(Rule):
         # 当前堆叠的顶部位置
         current_top_y = sphere_top_y
         
-        # 使用重叠确保物体之间有接触（重叠，确保挤压效果明显）
-        contact_overlap = -0.08  # 负值表示重叠，确保接触和挤压效果明显
-        
         for i, obj in enumerate(pressers):
             # 根据 aabb：物体底部 = p[1] - r[1]/2，顶部 = p[1] + r[1]/2
             # 物体半高 = r[1]/2
             
-            # 物体底部应该接触前一个物体的顶部（稍微重叠）
+            # 使用基于物体尺寸的重叠比例，确保真正接触
+            obj_half_height = obj.r[1] / 2.0
+            obj_height = obj.r[1]
+            # 使用物体高度的较大比例作为重叠量，确保不同大小的物体都能明显接触
+            # 重叠 20% 的物体高度，确保有明显的接触和挤压效果
+            contact_overlap = -obj_height * 0.20  # 重叠物体高度的 20%，确保明显接触
+            
+            # 物体底部应该接触前一个物体的顶部（重叠）
             # 物体底部 y = obj_center_y - r[1]/2
             # 我们希望：obj_center_y - r[1]/2 = current_top_y + contact_overlap
             # 所以：obj_center_y = current_top_y + contact_overlap + r[1]/2
-            obj_half_height = obj.r[1] / 2.0
             obj_center_y = current_top_y + contact_overlap + obj_half_height
             
             # X 和 Z 位置：可以稍微随机偏移，但保持在球体中心附近
             # 为了更真实，可以让物体稍微偏离中心，但不要太多
-            offset_x = float(rng.uniform(-0.12, 0.12))
-            offset_z = float(rng.uniform(-0.12, 0.12))
+            offset_x = float(rng.uniform(-0.10, 0.10))
+            offset_z = float(rng.uniform(-0.10, 0.10))
             
             new_obj = obj.copy()
             new_obj.p = np.array([
