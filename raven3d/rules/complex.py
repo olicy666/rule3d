@@ -70,6 +70,26 @@ def _spread_objects(objs: Sequence[ObjectState], rng) -> None:
             break
 
 
+def _separate_objects_no_contact(objs: Sequence[ObjectState], rng, gap: float = 0.06) -> None:
+    if len(objs) < 2:
+        return
+    for _ in range(12):
+        moved = False
+        for i in range(len(objs)):
+            for j in range(i + 1, len(objs)):
+                delta = objs[j].p - objs[i].p
+                dist = float(np.linalg.norm(delta))
+                min_dist = approx_radius(objs[i]) + approx_radius(objs[j]) + gap
+                if dist < min_dist:
+                    direction_vec = _unit_vector(rng) if dist < 1e-6 else delta / dist
+                    shift = 0.5 * (min_dist - dist)
+                    objs[i].p = objs[i].p - direction_vec * shift
+                    objs[j].p = objs[j].p + direction_vec * shift
+                    moved = True
+        if not moved:
+            break
+
+
 def _min_pairwise_distance(objs: Sequence[ObjectState]) -> float:
     if len(objs) < 2:
         return float("inf")
@@ -1413,7 +1433,7 @@ class R4_3NodeFusionEvolution(Rule):
             if idx not in used:
                 fused.append(obj.copy())
 
-        _spread_objects(fused, rng)
+        _separate_objects_no_contact(fused, rng)
         rng.shuffle(fused)
         return fused
 
@@ -1538,6 +1558,17 @@ class R4_4FormationEvolution(Rule):
         if len(objs) != count:
             raise ValueError("Object count does not match formation spec.")
         positions = self._positions_for(formation, count, rng)
+        if len(positions) >= 2:
+            min_scale = 1.0
+            for i in range(len(positions)):
+                for j in range(i + 1, len(positions)):
+                    base_dist = float(np.linalg.norm(positions[i] - positions[j]))
+                    if base_dist < 1e-6:
+                        continue
+                    required = approx_radius(objs[i]) + approx_radius(objs[j]) + 0.06
+                    min_scale = max(min_scale, required / base_dist)
+            if min_scale > 1.0:
+                positions = [pos * min_scale for pos in positions]
         arranged = []
         for obj, pos in zip(objs, positions):
             new_obj = obj.copy()

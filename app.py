@@ -592,6 +592,20 @@ def render_admin() -> None:
 
 def render_exam() -> None:
     st.title("SPIRAL3D:Structured Perception to Intelligent Reasoning And Logic in 3D 逻辑推理考试")
+    st.markdown(
+        """
+        <style>
+        div[data-testid="stCheckbox"] label > div:first-child {
+            transform: scale(1.35);
+            transform-origin: left center;
+        }
+        div[data-testid="stCheckbox"] label {
+            align-items: center;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
     st.sidebar.header("考试设置")
     st.sidebar.write(f"用户：{st.session_state.username}")
