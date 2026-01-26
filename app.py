@@ -370,8 +370,8 @@ def init_state() -> None:
         "score": 0,
         "seed": None,
         "viewer_reset_nonce": 0,
-        "show_big_view": False,
-        "big_view_selection": ["Ref1", "Ref2", "A", "B", "C", "D"],
+        "show_big_view": True,
+        "big_view_selection": ["Ref1", "Ref2"],
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -399,8 +399,8 @@ def reset_exam_state() -> None:
     st.session_state.score = 0
     st.session_state.seed = None
     st.session_state.viewer_reset_nonce = 0
-    st.session_state.show_big_view = False
-    st.session_state.big_view_selection = ["Ref1", "Ref2", "A", "B", "C", "D"]
+    st.session_state.show_big_view = True
+    st.session_state.big_view_selection = ["Ref1", "Ref2"]
     for idx in range(TOTAL_QUESTIONS):
         st.session_state.pop(f"answer_{idx}", None)
 

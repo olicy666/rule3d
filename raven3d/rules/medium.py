@@ -1456,10 +1456,10 @@ class R1_9DualSizeConservation(Rule):
 @dataclass
 class R1_11AttributeSwap(Rule):
     def __init__(self) -> None:
-        super().__init__("R1-11", RuleDifficulty.MEDIUM, "属性互换联动", "形状/尺度交替互换")
+        super().__init__("R1-11", RuleDifficulty.MEDIUM, "尺度/姿态交替互换", "尺寸与姿态交替互换（形状固定）")
 
     def sample_params(self, rng) -> Dict:
-        first_attr = "s" if rng.random() < 0.5 else "r"
+        first_attr = "r" if rng.random() < 0.5 else "R"
         return {"first_attr": first_attr}
 
     def generate_triplet(self, params, rng):
@@ -1475,16 +1475,20 @@ class R1_11AttributeSwap(Rule):
             objs[1].shape = str(rng.choice(options))
         if abs(size(objs[0]) - size(objs[1])) < 0.12 * size(objs[0]):
             objs[1] = apply_scale(objs[1], float(rng.uniform(1.25, 1.55)))
+        if float(np.linalg.norm(objs[0].rotation - objs[1].rotation)) < 0.25:
+            delta_rot = rng.uniform(math.pi / 8, math.pi / 4, size=3)
+            delta_rot = delta_rot * rng.choice([-1, 1], size=3)
+            objs[1] = apply_rotation(objs[1], delta_rot)
 
-        first_attr = params.get("first_attr", "s")
-        second_attr = "r" if first_attr == "s" else "s"
+        first_attr = params.get("first_attr", "r")
+        second_attr = "R" if first_attr == "r" else "r"
 
         def swap_attr(src, attr: str):
             swapped = clone_objects(src)
-            if attr == "s":
-                swapped[0].shape, swapped[1].shape = swapped[1].shape, swapped[0].shape
-            elif attr == "r":
+            if attr == "r":
                 swapped[0].r, swapped[1].r = swapped[1].r.copy(), swapped[0].r.copy()
+            elif attr == "R":
+                swapped[0].rotation, swapped[1].rotation = swapped[1].rotation.copy(), swapped[0].rotation.copy()
             else:
                 raise ValueError(f"Unsupported attr '{attr}'")
             return swapped
@@ -1493,18 +1497,27 @@ class R1_11AttributeSwap(Rule):
         b_objs = swap_attr(a_objs, first_attr)
         c_objs = swap_attr(b_objs, second_attr)
         scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
+
+        def snapshot(src):
+            return [
+                size(src[0]),
+                size(src[1]),
+                float(np.linalg.norm(src[0].rotation)),
+                float(np.linalg.norm(src[1].rotation)),
+            ]
+
         v = [
-            [a_objs[0].shape, a_objs[1].shape],
-            [b_objs[0].shape, b_objs[1].shape],
-            [c_objs[0].shape, c_objs[1].shape],
+            snapshot(a_objs),
+            snapshot(b_objs),
+            snapshot(c_objs),
         ]
         meta = build_rule_meta(
             self,
             "R1",
             2,
             involved,
-            ["s", "r"],
-            ["swap_s", "swap_r"],
+            ["r", "R"],
+            ["size(Oi)", "axis(Oi)"],
             "swap",
             {"first_attr": first_attr, "second_attr": second_attr},
             v,
@@ -1515,15 +1528,15 @@ class R1_11AttributeSwap(Rule):
     def make_distractors(self, scene_c: Scene, rng, meta: Dict) -> Tuple[list[Scene], list[str]]:
         if len(scene_c.objects) < 2:
             return [], []
-        first_attr = meta.get("pattern_params", {}).get("first_attr", "s")
-        second_attr = "r" if first_attr == "s" else "s"
+        first_attr = meta.get("pattern_params", {}).get("first_attr", "r")
+        second_attr = "R" if first_attr == "r" else "r"
 
         def swap_attr(src, attr: str):
             swapped = clone_objects(src)
-            if attr == "s":
-                swapped[0].shape, swapped[1].shape = swapped[1].shape, swapped[0].shape
-            elif attr == "r":
+            if attr == "r":
                 swapped[0].r, swapped[1].r = swapped[1].r.copy(), swapped[0].r.copy()
+            elif attr == "R":
+                swapped[0].rotation, swapped[1].rotation = swapped[1].rotation.copy(), swapped[0].rotation.copy()
             else:
                 raise ValueError(f"Unsupported attr '{attr}'")
             return swapped
@@ -1538,7 +1551,7 @@ class R1_11AttributeSwap(Rule):
             scene_from_objects(only_second),
             scene_from_objects(none),
         ]
-        reasons = ["仅进行第一步互换", "仅进行第二步互换", "两次互换都被撤销"]
+        reasons = ["仅交换第一步属性", "仅交换第二步属性", "两次交换都被撤销"]
         return distractors, reasons
 
 
@@ -1602,42 +1615,36 @@ class R1_12OrientationFollowMotion(Rule):
 
 
 @dataclass
-class R1_13DistanceSizeCoupled(Rule):
+class R1_13DensitySizeCoupled(Rule):
     def __init__(self) -> None:
-        super().__init__("R1-13", RuleDifficulty.MEDIUM, "距离驱动缩放", "远离锚点则变大，靠近则变小")
+        super().__init__("R1-13", RuleDifficulty.MEDIUM, "密度驱动缩放", "密度越大缩放越大，密度越小缩放越小")
 
     def sample_params(self, rng) -> Dict:
-        delta = float(rng.uniform(0.12, 0.2))
-        scale_up = float(rng.uniform(1.2, 1.4))
-        scale_down = 1.0 / scale_up
-        flip = rng.random() < 0.5
-        return {"delta": delta, "scale_up": scale_up, "scale_down": scale_down, "flip": flip}
+        scale_up = float(rng.uniform(1.25, 1.6))
+        scale_down = float(rng.uniform(0.6, 0.85))
+        factors = [scale_up, scale_down] if rng.random() < 0.5 else [scale_down, scale_up]
+        return {"density_factors": factors}
 
     def generate_triplet(self, params, rng):
         objs = init_objects(rng, 2, m=2)
         involved = [0, 1]
-        delta = params["delta"]
-        scale_up = params["scale_up"]
-        scale_down = params["scale_down"]
-        flip = params["flip"]
+        base_offset = float(rng.uniform(0.35, 0.6))
+        base_y = float(rng.uniform(-0.15, 0.15))
+        base_z = float(rng.uniform(-0.15, 0.15))
+        objs[0].p = np.array([-base_offset, base_y, base_z])
+        objs[1].p = np.array([base_offset, -base_y, -base_z])
 
-        d0 = float(rng.uniform(0.6, 0.8))
-        d1 = float(rng.uniform(0.6, 0.8))
-        objs[0].p = np.array([d0, 0.0, 0.0])
-        objs[1].p = np.array([-d1, 0.0, 0.0])
-
-        signs = [1.0, -1.0]
-        if flip:
-            signs = [-1.0, 1.0]
+        factors = [float(f) for f in params.get("density_factors", [1.3, 0.75])]
+        if len(factors) != 2:
+            factors = [1.3, 0.75]
+        scale_factors = [f ** (1.0 / 3.0) for f in factors]
 
         def step_objs(src):
             stepped = []
-            for obj, sign in zip(src, signs):
-                direction_vec = obj.p / (np.linalg.norm(obj.p) + 1e-6)
-                moved = apply_translation(obj, direction_vec * delta * sign)
-                factor = scale_up if sign > 0 else scale_down
-                moved = apply_scale(moved, factor)
-                stepped.append(moved)
+            for obj, den_factor, sc_factor in zip(src, factors, scale_factors):
+                updated = apply_density(obj, den_factor)
+                updated = apply_scale(updated, sc_factor)
+                stepped.append(updated)
             return stepped
 
         a_objs = clone_objects(objs)
@@ -1645,19 +1652,19 @@ class R1_13DistanceSizeCoupled(Rule):
         c_objs = step_objs(b_objs)
         scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
 
-        def dist_size(objects):
-            return [float(np.linalg.norm(objects[0].p)), size(objects[0]), float(np.linalg.norm(objects[1].p)), size(objects[1])]
+        def den_size(objects):
+            return [float(objects[0].density), size(objects[0]), float(objects[1].density), size(objects[1])]
 
-        v = [dist_size(s.objects) for s in scenes]
+        v = [den_size(s.objects) for s in scenes]
         meta = build_rule_meta(
             self,
             "R1",
             2,
             involved,
-            ["p", "r"],
-            ["dist(Oi,0)", "size(Oi)"],
+            ["d", "r"],
+            ["den(Oi)", "size(Oi)"],
             "coupled",
-            {"delta": delta, "signs": signs},
+            {"density_factors": factors},
             v,
             scenes,
         )
@@ -1667,35 +1674,45 @@ class R1_13DistanceSizeCoupled(Rule):
         if len(scene_c.objects) < 2:
             return [], []
         objs = clone_objects(scene_c.objects)
+        params = meta.get("pattern_params", {})
+        factors = params.get("density_factors")
+        if factors is None or len(factors) != 2:
+            factors = [1.3, 0.75]
+        scale_factors = [float(f) ** (1.0 / 3.0) for f in factors]
+
+        wrong_scale = clone_objects(objs)
+        for i, f in enumerate(scale_factors):
+            wrong_scale[i] = apply_scale(wrong_scale[i], 1.0 / f)
+
+        wrong_density = clone_objects(objs)
+        idx = int(rng.integers(0, len(wrong_density)))
+        wrong_density[idx] = apply_density(wrong_density[idx], 1.0 / float(factors[idx]))
+
         swap_sizes = clone_objects(objs)
         swap_sizes[0].r, swap_sizes[1].r = swap_sizes[1].r.copy(), swap_sizes[0].r.copy()
 
-        wrong_scale = clone_objects(objs)
-        wrong_scale[0] = apply_scale(wrong_scale[0], 0.75)
-
-        wrong_move = clone_objects(objs)
-        delta = float(meta.get("pattern_params", {}).get("delta", 0.15))
-        direction_vec = wrong_move[0].p / (np.linalg.norm(wrong_move[0].p) + 1e-6)
-        wrong_move[0] = apply_translation(wrong_move[0], -direction_vec * delta)
-
         distractors = [
-            scene_from_objects(swap_sizes),
             scene_from_objects(wrong_scale),
-            scene_from_objects(wrong_move),
+            scene_from_objects(wrong_density),
+            scene_from_objects(swap_sizes),
         ]
-        reasons = ["尺度与距离对应关系被打乱", "尺度变化方向错误", "位置变化方向错误"]
+        reasons = ["尺寸未随密度延续变化", "密度变化方向错误", "尺寸与密度对应关系被打乱"]
         return distractors, reasons
 
 
 @dataclass
-class R1_14MirrorSizeComplement(Rule):
+class R1_14MirrorDensityComplement(Rule):
     def __init__(self) -> None:
-        super().__init__("R1-14", RuleDifficulty.MEDIUM, "镜像互补缩放", "镜像位置下尺寸一增一减")
+        super().__init__("R1-14", RuleDifficulty.MEDIUM, "镜像密度缩放", "镜像位置下密度一增一减")
 
     def sample_params(self, rng) -> Dict:
-        delta_ratio = float(rng.uniform(0.3, 0.6))
-        sign = 1 if rng.random() < 0.5 else -1
-        return {"delta_ratio": delta_ratio * sign}
+        scale_up = float(rng.uniform(1.8, 2.6))
+        scale_down = float(rng.uniform(0.35, 0.6))
+        if rng.random() < 0.5:
+            factors = [scale_up, scale_down]
+        else:
+            factors = [scale_down, scale_up]
+        return {"density_factors": factors}
 
     def generate_triplet(self, params, rng):
         objs = init_objects(rng, 2, m=2)
@@ -1715,58 +1732,30 @@ class R1_14MirrorSizeComplement(Rule):
         left.rotation = rot
         right.rotation = rot * np.array([1.0, -1.0, -1.0])
 
-        s0, s1 = size(left), size(right)
-        total = s0 + s1
-        min_ratio = 0.2
-        if min(s0, s1) / total < min_ratio:
-            if s0 < s1:
-                target_small = (min_ratio / (1.0 - min_ratio)) * s1
-                f = (target_small / s0) ** (1 / 3)
-                left = apply_scale(left, f)
-            else:
-                target_small = (min_ratio / (1.0 - min_ratio)) * s0
-                f = (target_small / s1) ** (1 / 3)
-                right = apply_scale(right, f)
-            s0, s1 = size(left), size(right)
-            total = s0 + s1
+        factors = [float(f) for f in params.get("density_factors", [2.0, 0.5])]
+        if len(factors) != 2:
+            factors = [2.0, 0.5]
 
-        delta = s0 * params["delta_ratio"]
-        min_size = total * min_ratio
-        max_pos = (s1 - min_size) / 2.0
-        max_neg = (min_size - s0) / 2.0
-        if delta >= 0:
-            delta = min(delta, max_pos)
-        else:
-            delta = max(delta, max_neg)
-        min_delta_mag = total * 0.08
-        if abs(delta) < min_delta_mag:
-            delta = max_pos if max_pos >= abs(max_neg) else max_neg
-
-        def resize_pair(src, delta_val):
-            base0 = size(src[0])
-            base1 = size(src[1])
-            target0 = base0 + delta_val
-            target1 = total - target0
-            f0 = (target0 / base0) ** (1 / 3)
-            f1 = (target1 / base1) ** (1 / 3)
-            o0 = apply_scale(src[0], f0)
-            o1 = apply_scale(src[1], f1)
-            return [o0, o1]
+        def step_pair(src):
+            out = []
+            for obj, factor in zip(src, factors):
+                out.append(apply_density(obj, factor))
+            return out
 
         a_objs = [left, right]
-        b_objs = resize_pair(a_objs, delta)
-        c_objs = resize_pair(b_objs, delta)
+        b_objs = step_pair(a_objs)
+        c_objs = step_pair(b_objs)
         scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
-        v = [[size(o0), size(o1)] for o0, o1 in [a_objs, b_objs, c_objs]]
+        v = [[float(o0.density), float(o1.density)] for o0, o1 in [a_objs, b_objs, c_objs]]
         meta = build_rule_meta(
             self,
             "R1",
             2,
             involved,
-            ["p", "r", "R"],
-            ["mirror(x)", "size(0)+size(1)"],
+            ["p", "d", "R"],
+            ["mirror(x)", "den(Oi)"],
             "coupled",
-            {"total": total},
+            {"density_factors": factors},
             v,
             scenes,
         )
@@ -1776,22 +1765,28 @@ class R1_14MirrorSizeComplement(Rule):
         if len(scene_c.objects) < 2:
             return [], []
         objs = clone_objects(scene_c.objects)
-        both_up = clone_objects(objs)
-        both_up[0] = apply_scale(both_up[0], 1.25)
-        both_up[1] = apply_scale(both_up[1], 1.25)
+        params = meta.get("pattern_params", {})
+        factors = params.get("density_factors")
+        if factors is None or len(factors) != 2:
+            factors = [2.0, 0.5]
+
+        stay = clone_objects(objs)
+        for i, factor in enumerate(factors):
+            stay[i] = apply_density(stay[i], 1.0 / float(factor))
+
+        reverse = clone_objects(objs)
+        for i, factor in enumerate(factors):
+            reverse[i] = apply_density(reverse[i], 1.0 / float(factor) ** 2)
 
         break_mirror = clone_objects(objs)
         break_mirror[1] = apply_translation(break_mirror[1], np.array([0.12, 0.0, 0.0]))
 
-        swap_sizes = clone_objects(objs)
-        swap_sizes[0].r, swap_sizes[1].r = swap_sizes[1].r.copy(), swap_sizes[0].r.copy()
-
         distractors = [
-            scene_from_objects(both_up),
+            scene_from_objects(stay),
+            scene_from_objects(reverse),
             scene_from_objects(break_mirror),
-            scene_from_objects(swap_sizes),
         ]
-        reasons = ["尺寸同向变化", "镜像关系被破坏", "尺度互补方向错误"]
+        reasons = ["密度未延续变化，停留在上一帧", "密度变化方向反向", "镜像关系被破坏"]
         return distractors, reasons
 
 
@@ -1814,6 +1809,6 @@ def build_medium_rules() -> List[Rule]:
         R1_9DualSizeConservation(),
         R1_11AttributeSwap(),
         R1_12OrientationFollowMotion(),
-        R1_13DistanceSizeCoupled(),
-        R1_14MirrorSizeComplement(),
+        R1_13DensitySizeCoupled(),
+        R1_14MirrorDensityComplement(),
     ]

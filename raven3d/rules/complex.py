@@ -128,6 +128,10 @@ class R1_10ScaleRotateCoupled(Rule):
         k = params["k"]
         delta_rot = np.array(params["delta_rot"])
         objs = init_objects(rng, 1, m=2)
+        non_sphere_shapes = [shape for shape in SHAPES if shape != "sphere"]
+        for idx, obj in enumerate(objs):
+            if obj.shape == "sphere":
+                objs[idx] = switch_shape(obj, str(rng.choice(non_sphere_shapes)))
         involved = [0]
         a_objs = clone_objects(objs)
         b_objs = clone_objects(objs)
@@ -2342,7 +2346,7 @@ class R4_9SoftBodySqueeze(Rule):
 
     @staticmethod
     def _random_presser(rng) -> ObjectState:
-        shape = str(rng.choice([s for s in SHAPES if s != "sphere"]))
+        shape = str(rng.choice(["sphere", "cylinder"]))
         obj = random_object(rng, shape=shape)
         scale = float(rng.uniform(0.75, 1.8))
         obj = apply_scale(obj, scale)

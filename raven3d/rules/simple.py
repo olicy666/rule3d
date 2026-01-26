@@ -507,9 +507,8 @@ class R1_6DensityArithmetic(Rule):
         super().__init__("R1-6", RuleDifficulty.SIMPLE, "密度等差", "density 按等差变化")
 
     def sample_params(self, rng) -> Dict:
-        delta_ratio = float(rng.uniform(0.9, 1.3))
-        sign = -1.0 if rng.random() < 0.5 else 1.0
-        return {"delta_ratio": delta_ratio * sign}
+        delta_ratio = float(rng.uniform(3.0, 4.0))
+        return {"delta_ratio": delta_ratio}
 
     def generate_triplet(self, params, rng):
         objs = init_objects(rng, 2)
@@ -551,14 +550,28 @@ class R1_6DensityArithmetic(Rule):
             delta = 0.0
         base_density = float(v2) if v2 is not None else float(v3) - float(delta)
 
-        wrong_factors = [2.2, 0.3, -1.6]
+        wrong_factors = [4.5, 0.6, -0.1]
+        correct_density = float(scene_c.objects[0].density)
+        min_ratio = 2.0
+
+        def enforce_ratio(value: float) -> float:
+            value = max(float(value), 1e-3)
+            if correct_density <= 0:
+                return value
+            ratio = max(value / correct_density, correct_density / value)
+            if ratio < min_ratio:
+                if value >= correct_density:
+                    value = correct_density * min_ratio
+                else:
+                    value = correct_density / min_ratio
+            return max(float(value), 1e-3)
 
         def with_density(value: float) -> Scene:
             objs = clone_objects(scene_c.objects)
             objs[0].density = max(float(value), 1e-3)
             return scene_from_objects(objs)
 
-        distractors = [with_density(base_density + delta * f) for f in wrong_factors]
+        distractors = [with_density(enforce_ratio(base_density + delta * f)) for f in wrong_factors]
         reasons = [
             "密度差值显著偏大",
             "密度差值显著偏小",

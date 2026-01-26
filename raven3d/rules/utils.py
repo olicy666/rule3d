@@ -43,7 +43,39 @@ def init_objects(rng: np.random.Generator, k: int, m: int | None = None) -> List
     if m is None:
         m = max(k, int(rng.integers(2, 4)))
     m = min(max(m, k, 2), 3)
-    return [random_object(rng) for _ in range(m)]
+    objs = [random_object(rng) for _ in range(m)]
+    _separate_objects_light_contact(objs, rng)
+    return objs
+
+
+def _separate_objects_light_contact(
+    objs: Sequence[ObjectState],
+    rng: np.random.Generator,
+    overlap_ratio: float = 1.0,
+    max_iter: int = 12,
+) -> None:
+    if len(objs) < 2:
+        return
+    for _ in range(max_iter):
+        moved = False
+        for i in range(len(objs)):
+            for j in range(i + 1, len(objs)):
+                delta = objs[i].p - objs[j].p
+                dist = float(np.linalg.norm(delta))
+                target = (approx_radius(objs[i]) + approx_radius(objs[j])) * overlap_ratio
+                if dist >= target:
+                    continue
+                if dist < 1e-6:
+                    direction = rng.normal(size=3)
+                    direction = direction / (np.linalg.norm(direction) + 1e-9)
+                else:
+                    direction = delta / (dist + 1e-9)
+                shift = 0.5 * (target - dist)
+                objs[i].p = objs[i].p + direction * shift
+                objs[j].p = objs[j].p - direction * shift
+                moved = True
+        if not moved:
+            break
 
 
 def clone_objects(objs: Sequence[ObjectState]) -> List[ObjectState]:
