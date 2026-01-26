@@ -1478,10 +1478,10 @@ class R1_11AttributeSwap(Rule):
         objs[1].shape = shape
         size_a = size(objs[0])
         size_b = size(objs[1])
-        min_ratio = 2.2
+        min_ratio = 3.0
         ratio = max(size_a, size_b) / max(min(size_a, size_b), 1e-6)
         if ratio < min_ratio:
-            target_ratio = float(rng.uniform(2.6, 3.8))
+            target_ratio = float(rng.uniform(4.0, 6.0))
             if size_a >= size_b:
                 factor = (size_a * target_ratio / size_b) ** (1 / 3)
                 objs[1] = apply_scale(objs[1], factor)
