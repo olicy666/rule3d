@@ -1462,7 +1462,13 @@ class R4_3NodeFusionEvolution(Rule):
         base.r = obj_a.r + obj_b.r
         base.p = (obj_a.p + obj_b.p) / 2.0
         base.rotation = rng.uniform(-math.pi / 4, math.pi / 4, size=3)
-        base.density = float(obj_a.density)
+        weight_a = float(obj_a.density) * float(obj_a.volume())
+        weight_b = float(obj_b.density) * float(obj_b.volume())
+        fused_volume = float(base.volume())
+        if fused_volume > 1e-6:
+            base.density = (weight_a + weight_b) / fused_volume
+        else:
+            base.density = float(obj_a.density)
 
         for idx, obj in enumerate(objs):
             if idx == idx_a:
