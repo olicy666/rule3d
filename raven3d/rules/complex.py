@@ -102,6 +102,17 @@ def _min_pairwise_distance(objs: Sequence[ObjectState]) -> float:
     return min_dist
 
 
+def _all_non_contact(objs: Sequence[ObjectState], gap: float = 0.05) -> bool:
+    if len(objs) < 2:
+        return True
+    for i in range(len(objs)):
+        for j in range(i + 1, len(objs)):
+            min_dist = approx_radius(objs[i]) + approx_radius(objs[j]) + gap
+            if float(np.linalg.norm(objs[i].p - objs[j].p)) < min_dist:
+                return False
+    return True
+
+
 @dataclass
 class R1_10ScaleRotateCoupled(Rule):
     def __init__(self) -> None:
@@ -1326,7 +1337,7 @@ class R4_2NodeSplitEvolution(Rule):
                 child.p = child.p + sign * offset
                 child.rotation = rng.uniform(-math.pi / 4, math.pi / 4, size=3)
                 out.append(child)
-        _spread_objects(out, rng)
+        _separate_objects_no_contact(out, rng, gap=0.25)  # 增大间距，让物体分开得更远
         rng.shuffle(out)
         return out
 
@@ -1374,8 +1385,8 @@ class R4_2NodeSplitEvolution(Rule):
 
         wrong_density = clone_objects(objs)
         idx_density = int(rng.integers(0, len(wrong_density)))
-        density_factor = float(rng.uniform(0.4, 0.65) if rng.random() < 0.5 else rng.uniform(1.6, 2.2))
-        size_factor = float(rng.uniform(0.55, 0.75) if rng.random() < 0.5 else rng.uniform(1.35, 1.7))
+        density_factor = float(rng.uniform(0.35, 0.55) if rng.random() < 0.5 else rng.uniform(1.8, 2.6))
+        size_factor = float(rng.uniform(0.5, 0.7) if rng.random() < 0.5 else rng.uniform(1.5, 1.9))
         adjusted = apply_scale(wrong_density[idx_density], size_factor)
         adjusted.density = max(adjusted.density * density_factor, 1e-3)
         wrong_density[idx_density] = adjusted
@@ -1433,7 +1444,7 @@ class R4_3NodeFusionEvolution(Rule):
             if idx not in used:
                 fused.append(obj.copy())
 
-        _separate_objects_no_contact(fused, rng)
+        _separate_objects_no_contact(fused, rng, gap=0.25)  # 增大间距，让物体分开得更远
         rng.shuffle(fused)
         return fused
 
@@ -1451,6 +1462,7 @@ class R4_3NodeFusionEvolution(Rule):
                 density_by_shape[obj.shape] = float(rng.uniform(0.8, 1.2))
             obj.density = density_by_shape[obj.shape]
 
+        _separate_objects_no_contact(objs, rng, gap=0.25)  # 增大间距，让物体分开得更远
         a_objs = clone_objects(objs)
         b_objs = self._fuse_objects(a_objs, rng)
         c_objs = self._fuse_objects(b_objs, rng)
@@ -1492,8 +1504,8 @@ class R4_3NodeFusionEvolution(Rule):
 
         wrong_density = clone_objects(objs)
         idx_density = int(rng.integers(0, len(wrong_density)))
-        density_factor = float(rng.uniform(0.4, 0.65) if rng.random() < 0.5 else rng.uniform(1.6, 2.2))
-        size_factor = float(rng.uniform(0.55, 0.75) if rng.random() < 0.5 else rng.uniform(1.35, 1.7))
+        density_factor = float(rng.uniform(0.35, 0.55) if rng.random() < 0.5 else rng.uniform(1.8, 2.6))
+        size_factor = float(rng.uniform(0.5, 0.7) if rng.random() < 0.5 else rng.uniform(1.5, 1.9))
         adjusted = apply_scale(wrong_density[idx_density], size_factor)
         adjusted.density = max(adjusted.density * density_factor, 1e-3)
         wrong_density[idx_density] = adjusted
@@ -1656,8 +1668,8 @@ class R4_4FormationEvolution(Rule):
 
         wrong_density = clone_objects(scene_c.objects)
         idx_density = int(rng.integers(0, len(wrong_density)))
-        density_factor = float(rng.uniform(0.6, 0.85) if rng.random() < 0.5 else rng.uniform(1.2, 1.5))
-        size_factor = float(rng.uniform(0.7, 0.9) if rng.random() < 0.5 else rng.uniform(1.15, 1.4))
+        density_factor = float(rng.uniform(0.35, 0.55) if rng.random() < 0.5 else rng.uniform(1.8, 2.6))
+        size_factor = float(rng.uniform(0.5, 0.7) if rng.random() < 0.5 else rng.uniform(1.5, 1.9))
         adjusted = apply_scale(wrong_density[idx_density], size_factor)
         adjusted.density = max(adjusted.density * density_factor, 1e-3)
         wrong_density[idx_density] = adjusted
@@ -1728,6 +1740,7 @@ class R4_5ContactInfection(Rule):
         objs = clone_objects(scene.objects)
         for _ in range(count):
             objs.append(random_object(rng))
+        _separate_objects_no_contact(objs, rng, gap=0.25)  # 增大间距，让物体分开得更远
         return scene_from_objects(objs)
 
     def generate_triplet(self, params, rng):
@@ -1735,6 +1748,7 @@ class R4_5ContactInfection(Rule):
         attrs = list(params.get("infect_attrs", []))
         objs = [random_object(rng) for _ in range(count)]
         self._ensure_size_contrast(objs, rng)
+        _separate_objects_no_contact(objs, rng, gap=0.25)  # 增大间距，让物体分开得更远
         scene_a = scene_from_objects(objs)
 
         infected_b, source_b = self._infect(scene_a, attrs, rng)
@@ -1774,11 +1788,13 @@ class R4_5ContactInfection(Rule):
             wrong_count = [obj for i, obj in enumerate(objs) if i not in set(int(x) for x in drop)]
         else:
             wrong_count = objs + [random_object(rng)]
+        _separate_objects_no_contact(wrong_count, rng, gap=0.25)  # 增大间距
 
         wrong_size = clone_objects(objs)
         idx_size = int(rng.integers(0, len(wrong_size)))
-        scale = float(rng.uniform(0.7, 0.9) if rng.random() < 0.5 else rng.uniform(1.15, 1.4))
+        scale = float(rng.uniform(0.5, 0.7) if rng.random() < 0.5 else rng.uniform(1.5, 1.9))
         wrong_size[idx_size] = apply_scale(wrong_size[idx_size], scale)
+        _separate_objects_no_contact(wrong_size, rng, gap=0.25)  # 增大间距
 
         wrong_density = clone_objects(objs)
         idx_density = int(rng.integers(0, len(wrong_density)))
@@ -1787,9 +1803,10 @@ class R4_5ContactInfection(Rule):
                 wrong_density[idx_density], rng.uniform(0.25, 0.6, size=3)
             )
         else:
-            density_factor = float(rng.uniform(0.6, 0.85) if rng.random() < 0.5 else rng.uniform(1.2, 1.5))
+            density_factor = float(rng.uniform(0.35, 0.55) if rng.random() < 0.5 else rng.uniform(1.8, 2.6))
             wrong_density[idx_density] = wrong_density[idx_density].copy()
             wrong_density[idx_density].density = max(wrong_density[idx_density].density * density_factor, 1e-3)
+        _separate_objects_no_contact(wrong_density, rng, gap=0.25)  # 增大间距
 
         distractors = [
             scene_from_objects(wrong_count),
@@ -1807,7 +1824,7 @@ class R4_5ContactInfection(Rule):
 @dataclass
 class R4_6AdvancedOrbitalRotation(Rule):
     def __init__(self) -> None:
-        super().__init__("R4-6", RuleDifficulty.COMPLEX, "进阶行星公转", "公转中心由内到外轮流切换")
+        super().__init__("R4-6", RuleDifficulty.COMPLEX, "进阶行星公转", "公转中心按相邻最大尺寸切换")
 
     def sample_params(self, rng) -> Dict:
         count = int(rng.integers(4, 7))
@@ -1853,6 +1870,30 @@ class R4_6AdvancedOrbitalRotation(Rule):
         return scene_from_objects(objs)
 
     @staticmethod
+    def _adjacent_by_radius(order: Sequence[int], center_idx: int) -> List[int]:
+        if not order:
+            return []
+        try:
+            pos = order.index(int(center_idx))
+        except ValueError:
+            return []
+        neighbors = []
+        if pos > 0:
+            neighbors.append(order[pos - 1])
+        if pos + 1 < len(order):
+            neighbors.append(order[pos + 1])
+        return neighbors
+
+    @classmethod
+    def _next_center_idx(cls, order: Sequence[int], objs: Sequence[ObjectState], center_idx: int) -> int:
+        neighbors = cls._adjacent_by_radius(order, center_idx)
+        if not neighbors:
+            return int(center_idx)
+        if len(neighbors) == 1:
+            return int(neighbors[0])
+        return int(max(neighbors, key=lambda idx: size(objs[int(idx)])))
+
+    @staticmethod
     def _scene_from_frame(frame: Dict) -> Scene:
         objs = []
         for obj in frame.get("objects", []):
@@ -1870,7 +1911,7 @@ class R4_6AdvancedOrbitalRotation(Rule):
     def generate_triplet(self, params, rng):
         count = int(params.get("count", 3))
         count = max(4, count)
-        min_sep = 0.12
+        gap = 0.06
         for _ in range(40):
             objs = [random_object(rng) for _ in range(count)]
             radii = self._unique_samples(rng, count, 0.45, 1.2, 0.12)
@@ -1884,15 +1925,18 @@ class R4_6AdvancedOrbitalRotation(Rule):
                 obj.p = np.array([r * math.cos(ang), r * math.sin(ang), 0.0])
 
             order = [idx for idx, _ in sorted(enumerate(radii), key=lambda kv: kv[1])]
-            center_indices = [order[0], order[1], order[2]]
+            center_a = int(order[0])
+            center_b = self._next_center_idx(order, objs, center_a)
+            center_c = self._next_center_idx(order, objs, center_b)
+            center_indices = [center_a, center_b, center_c]
 
             scene_a = scene_from_objects(clone_objects(objs))
-            scene_b = self._rotate_step_scene(scene_a, center_indices[1], deltas)
-            scene_c = self._rotate_step_scene(scene_b, center_indices[2], deltas)
+            scene_b = self._rotate_step_scene(scene_a, center_b, deltas)
+            scene_c = self._rotate_step_scene(scene_b, center_c, deltas)
             if (
-                _min_pairwise_distance(scene_a.objects) >= min_sep
-                and _min_pairwise_distance(scene_b.objects) >= min_sep
-                and _min_pairwise_distance(scene_c.objects) >= min_sep
+                _all_non_contact(scene_a.objects, gap)
+                and _all_non_contact(scene_b.objects, gap)
+                and _all_non_contact(scene_c.objects, gap)
             ):
                 break
         v = center_indices
@@ -1902,8 +1946,8 @@ class R4_6AdvancedOrbitalRotation(Rule):
             "R4",
             len(involved),
             involved,
-            ["p"],
-            ["orbit(theta_i)", "center_idx"],
+            ["p", "r"],
+            ["orbit(theta_i)", "center_idx", "size(Oi)"],
             "orbit-center-shift",
             {
                 "center_order": order,
@@ -1926,19 +1970,36 @@ class R4_6AdvancedOrbitalRotation(Rule):
 
         scene_b = self._scene_from_frame(frames[1]) if len(frames) > 1 else scene_c
 
-        if not center_indices or not deltas:
+        if not center_indices or not deltas or not center_order:
             return [], []
 
-        skip_idx = center_order[3] if len(center_order) > 3 else center_indices[2]
-        wrong_skip = self._rotate_step_scene(scene_b, skip_idx, deltas)
+        if len(center_indices) < 3:
+            return [], []
+        prev_center = center_indices[1]
+        correct_center = center_indices[2]
+        neighbors = self._adjacent_by_radius(center_order, prev_center)
+        wrong_reason = "公转中心未选相邻最大尺寸"
+        if len(neighbors) >= 2:
+            wrong_center = neighbors[0] if neighbors[0] != correct_center else neighbors[1]
+        else:
+            non_adjacent = [
+                idx for idx in center_order if idx not in neighbors and idx not in (prev_center, correct_center)
+            ]
+            if non_adjacent:
+                wrong_center = non_adjacent[0]
+                wrong_reason = "公转中心选择了不相邻物体"
+            else:
+                wrong_center = correct_center
+
+        wrong_skip = self._rotate_step_scene(scene_b, wrong_center, deltas)
         wrong_hold = self._rotate_step_scene(scene_b, center_indices[1], deltas)
         scaled = [d * 0.3 for d in deltas]
         wrong_angle = self._rotate_step_scene(scene_b, center_indices[2], scaled)
 
         distractors = [wrong_skip, wrong_hold, wrong_angle]
         reasons = [
-            "公转中心跨越内外顺序",
-            "公转中心未按帧切换",
+            wrong_reason,
+            "公转中心未按规则切换",
             "公转角速度不符合规则",
         ]
         return distractors, reasons
@@ -2197,7 +2258,7 @@ class R4_8DampedBounce(Rule):
                 wrong_shape_size[idx] = switch_shape(wrong_shape_size[idx], str(rng.choice(shape_choices)))
             shape_size_reason = "形状变化破坏规则"
         else:
-            size_factor = float(rng.uniform(0.45, 0.6) if rng.random() < 0.5 else rng.uniform(1.6, 2.0))
+            size_factor = float(rng.uniform(0.4, 0.6) if rng.random() < 0.5 else rng.uniform(1.7, 2.2))
             wrong_shape_size[idx] = apply_scale(wrong_shape_size[idx], size_factor)
             shape_size_reason = "尺寸变化破坏规则"
 
@@ -2225,10 +2286,12 @@ class R4_9SoftBodySqueeze(Rule):
 
     @staticmethod
     def _build_base_sphere() -> ObjectState:
+        # 球体底部在 y=0，所以球体中心在 y = r[1]
+        sphere_radius = 1.6
         sphere = ObjectState(
             shape="sphere",
             r=np.array([1.6, 1.6, 1.6]),
-            p=np.array([0.0, 0.0, 0.0]),
+            p=np.array([0.0, sphere_radius, 0.0]),  # 球体中心在 y = r[1]，使底部在 y=0
             rotation=np.zeros(3),
             density=1.0,
         )
@@ -2244,23 +2307,41 @@ class R4_9SoftBodySqueeze(Rule):
 
     @staticmethod
     def _position_pressers(pressers: Sequence[ObjectState], sphere: ObjectState, rng) -> List[ObjectState]:
+        """
+        将挤压物体垂直堆叠在球体上方，像积木一样一个叠一个，确保接触但不穿模。
+        """
         placed = []
+        # 计算球体顶部位置（球体中心 y + 球体半径 y）
+        sphere_top_y = sphere.p[1] + sphere.r[1]
+        
+        # 当前堆叠的顶部位置
+        current_top_y = sphere_top_y
+        
         for i, obj in enumerate(pressers):
-            angle = float(2 * math.pi * i / max(len(pressers), 1))
-            angle += float(rng.uniform(-0.25, 0.25))
-            y_jitter = float(rng.uniform(-0.2, 0.2))
-            direction_vec = np.array([math.cos(angle), y_jitter, math.sin(angle)], dtype=float)
-            norm = float(np.linalg.norm(direction_vec))
-            if norm < 1e-6:
-                direction_vec = np.array([1.0, 0.0, 0.0], dtype=float)
-            else:
-                direction_vec = direction_vec / norm
-            gap = float(rng.uniform(0.01, 0.04))
-            distance = approx_radius(sphere) + approx_radius(obj) + gap
-            x, y, z = (sphere.p + direction_vec * distance).tolist()
+            # 计算物体在 y 方向的高度（r[1] 是 y 轴方向的半高）
+            obj_height = obj.r[1]
+            
+            # 物体中心 y 位置 = 当前堆叠顶部 + 物体高度
+            # 这样物体的底部刚好接触前一个物体（或球体）的顶部
+            obj_center_y = current_top_y + obj_height
+            
+            # X 和 Z 位置：可以稍微随机偏移，但保持在球体中心附近
+            # 为了更真实，可以让物体稍微偏离中心，但不要太多
+            offset_x = float(rng.uniform(-0.15, 0.15))
+            offset_z = float(rng.uniform(-0.15, 0.15))
+            
             new_obj = obj.copy()
-            new_obj.p = np.array([x, y, z], dtype=float)
+            new_obj.p = np.array([
+                sphere.p[0] + offset_x,
+                obj_center_y,
+                sphere.p[2] + offset_z
+            ], dtype=float)
+            
             placed.append(new_obj)
+            
+            # 更新堆叠顶部位置：当前物体顶部 = 物体中心 + 物体高度
+            current_top_y = obj_center_y + obj_height
+        
         return placed
 
     @staticmethod
@@ -2281,9 +2362,12 @@ class R4_9SoftBodySqueeze(Rule):
 
     def _build_scene(self, pressers: Sequence[ObjectState], rng) -> tuple[Scene, float]:
         base_sphere = self._build_base_sphere()
-        placed = self._position_pressers(pressers, base_sphere, rng)
-        ratio = self._pressure_ratio(placed, base_sphere)
+        # 先计算压力比例
+        ratio = self._pressure_ratio(pressers, base_sphere)
+        # 先形变球体，然后基于形变后的球体计算堆叠位置
         deformed = self._deform_sphere(base_sphere, ratio)
+        # 基于形变后的球体计算堆叠位置，确保物体接触形变后的球体顶部
+        placed = self._position_pressers(pressers, deformed, rng)
         objs = [deformed] + placed
         return scene_from_objects(objs), ratio
 
@@ -2352,7 +2436,8 @@ class R4_9SoftBodySqueeze(Rule):
         def build_with_ratio(ratio: float) -> Scene:
             base_sphere = self._build_base_sphere()
             deformed = self._deform_sphere(base_sphere, ratio)
-            placed = self._position_pressers(pressers, base_sphere, rng)
+            # 基于形变后的球体计算堆叠位置
+            placed = self._position_pressers(pressers, deformed, rng)
             return scene_from_objects([deformed] + placed)
 
         wrong_hold = build_with_ratio(ratio_b)
