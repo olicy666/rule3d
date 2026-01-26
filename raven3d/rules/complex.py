@@ -1449,24 +1449,26 @@ class R4_3NodeFusionEvolution(Rule):
         fuse_shape = str(rng.choice(preferred if preferred else candidates))
         indices = by_shape[fuse_shape]
         rng.shuffle(indices)
-        if len(indices) >= 2:
-            idx_a, idx_b = int(indices[0]), int(indices[1])
-            used.add(idx_a)
-            used.add(idx_b)
-            obj_a = objs[idx_a]
-            obj_b = objs[idx_b]
-            base = obj_a.copy()
-            base.r = obj_a.r + obj_b.r
-            base.p = (obj_a.p + obj_b.p) / 2.0
-            base.rotation = rng.uniform(-math.pi / 4, math.pi / 4, size=3)
-            fused.append(base)
+        if len(indices) < 2:
+            return [obj.copy() for obj in objs]
+        idx_a, idx_b = sorted([int(indices[0]), int(indices[1])])
+        obj_a = objs[idx_a]
+        obj_b = objs[idx_b]
+        base = obj_a.copy()
+        base.r = obj_a.r + obj_b.r
+        base.p = (obj_a.p + obj_b.p) / 2.0
+        base.rotation = rng.uniform(-math.pi / 4, math.pi / 4, size=3)
+        base.density = float(obj_a.density)
 
         for idx, obj in enumerate(objs):
-            if idx not in used:
+            if idx == idx_a:
+                fused.append(base)
+            elif idx == idx_b:
+                continue
+            else:
                 fused.append(obj.copy())
 
         _separate_objects_no_contact(fused, rng, gap=0.25)  # 增大间距，让物体分开得更远
-        rng.shuffle(fused)
         return fused
 
     def generate_triplet(self, params, rng):
@@ -2371,8 +2373,9 @@ class R4_9SoftBodySqueeze(Rule):
             obj_half_height = obj.r[1] / 2.0
             obj_height = obj.r[1]
             # 使用物体高度的较大比例作为重叠量，确保不同大小的物体都能明显接触
-            # 重叠 20% 的物体高度，确保有明显的接触和挤压效果
-            contact_overlap = -obj_height * 0.20  # 重叠物体高度的 20%，确保明显接触
+            # 重叠 50% 的物体高度，确保有非常明显的接触和挤压效果
+            # 这样物体底部会深入前一个物体内部一半，确保明显的挤压
+            contact_overlap = -obj_height * 0.50  # 重叠物体高度的 50%，确保非常明显的接触和挤压
             
             # 物体底部应该接触前一个物体的顶部（重叠）
             # 物体底部 y = obj_center_y - r[1]/2
