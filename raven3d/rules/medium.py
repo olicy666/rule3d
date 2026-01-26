@@ -1149,9 +1149,9 @@ class R3_1VolumeSumConserved(Rule):
         if mode == "flat":
             return np.zeros(3, dtype=float)
 
-        max_down_ratio = 0.25
-        max_up_ratio = 0.45
-        min_step_ratio = 0.08
+        max_down_ratio = 0.35
+        max_up_ratio = 0.7
+        min_step_ratio = 0.15
 
         indices = [0, 1, 2]
         if mode == "one-down-two-up":

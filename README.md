@@ -96,7 +96,7 @@ Insight：把静态的 3D 问答提升到了图World Model的高度。
 - **R2-12 尺度轴置换循环**：$$(r_x,r_y,r_z)\to(r_y,r_z,r_x)\to(r_z,r_x,r_y)$$
 
 ### R3 隐式空间结构推理
-- **R3-1 三体积想等**：$$\sum_i \text{size}(i)=C,\ \text{size}_i^{t+1}=\text{size}_i^t+\Delta_i,\ \sum_i \Delta_i=0$$（允许 $\Delta_i=0$）
+- **R3-1 三体积相等**：$$\sum_i \text{size}(i)=C,\ \text{size}_i^{t+1}=\text{size}_i^t+\Delta_i,\ \sum_i \Delta_i=0$$（允许 $\Delta_i=0$）
 - **R3-2 排序模式循环**：$$\text{ord}_x(S_1),\text{ord}_x(S_2),\text{ord}_x(S_3)\ \text{按固定置换}$$
 - **R3-3 距离集合等比**：左右独立等比缩放（$k_L,k_R$ 允许为 1）
 - **R3-4 刚体对称变换**：$\text{sym}(S_2)=1,\ X_3=Q X_2+t$

@@ -535,7 +535,7 @@ class R3_7PositionCycle(Rule):
         super().__init__("R3-7", RuleDifficulty.COMPLEX, "多对象位置轮换", "不同形状沿结构按步长轮换")
 
     def sample_params(self, rng) -> Dict:
-        count = int(rng.integers(2, 6))
+        count = int(rng.integers(3, 5))
         direction = "cw" if rng.random() < 0.5 else "ccw"
         step = int(rng.integers(1, count))
         return {"count": count, "direction": direction, "step": step}
