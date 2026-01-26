@@ -199,23 +199,21 @@ class R2_3DirectionRotate(Rule):
             reserved=[(objs[0].p, r0), (objs[1].p, r1)],
         )
 
-        def rotate_scene(src, angle: float):
-            rot = np.array(
-                [
-                    [math.cos(angle), -math.sin(angle), 0],
-                    [math.sin(angle), math.cos(angle), 0],
-                    [0, 0, 1],
-                ]
-            )
+        # 每个物体围绕自己的固定轴（z轴）旋转，而不是位置旋转
+        def rotate_objects(src, delta_angle: float):
             out = clone_objects(src)
+            # 每个物体围绕 z 轴旋转固定角度
             for obj in out:
-                obj.p = center + rot @ (obj.p - center)
+                # 在原有旋转基础上增加固定角度的 z 轴旋转
+                obj.rotation = obj.rotation + np.array([0.0, 0.0, delta_angle])
             return out
 
         a_objs = clone_objects(objs)
-        b_objs = rotate_scene(a_objs, theta)
-        c_objs = rotate_scene(b_objs, theta)
+        b_objs = rotate_objects(a_objs, theta)  # 第一帧到第二帧旋转 theta
+        c_objs = rotate_objects(b_objs, theta)  # 第二帧到第三帧再旋转 theta
         scenes_objs = [a_objs, b_objs, c_objs]
+        
+        # 计算方向向量（用于 meta 记录）
         base_dir = (a_objs[1].p - a_objs[0].p) / (np.linalg.norm(a_objs[1].p - a_objs[0].p) + 1e-9)
         dirs = [rotate_dir(0), rotate_dir(theta), rotate_dir(2 * theta)]
         scenes = [scene_from_objects(x) for x in scenes_objs]
