@@ -42,7 +42,7 @@ class S01ScaleGeometric(Rule):
     def generate_triplet(self, params, rng):
         k = params["k"]
         objs = init_objects(rng, 1)
-        involved = [0]
+        involved = list(range(len(objs)))
         a_objs = clone_objects(objs)
         b_objs = clone_objects(objs)
         b_objs[0] = apply_scale(b_objs[0], k)
@@ -71,7 +71,7 @@ class R1_1ScaleArithmetic(Rule):
 
     def generate_triplet(self, params, rng):
         objs = init_objects(rng, 1)
-        involved = [0]
+        involved = list(range(len(objs)))
         base_obj = objs[0]
         base_size = size(base_obj)
         delta_ratio = float(params["delta_ratio"])
@@ -245,23 +245,21 @@ class R2_2AnisotropicGeometric(Rule):
         involved = [0]
         factor = float(params["factor"])
         axis_idx = int(params["axis"])
-        base = objs[0]
         squeeze = 1.0 / math.sqrt(factor)
         scale = np.ones(3)
         scale[axis_idx] = factor
         for i in range(3):
             if i != axis_idx:
                 scale[i] = squeeze
+        base = objs[0]
         alt = apply_scale(base, scale)
         alt2 = apply_scale(alt, scale)
         max_radius = max(approx_radius(base), approx_radius(alt), approx_radius(alt2))
         place_extras_apart(objs, rng, fixed_count=1, reserved=[(base.p, max_radius)])
 
         a_objs = clone_objects(objs)
-        b_objs = clone_objects(objs)
-        b_objs[0] = alt
-        c_objs = clone_objects(b_objs)
-        c_objs[0] = apply_scale(b_objs[0], scale)
+        b_objs = [apply_scale(obj, scale) for obj in a_objs]
+        c_objs = [apply_scale(obj, scale) for obj in b_objs]
         scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
         v = [aspect_ratio(o) for o in [a_objs[0], b_objs[0], c_objs[0]]]
         meta = build_rule_meta(
@@ -285,7 +283,7 @@ class R2_2AnisotropicGeometric(Rule):
         axis_idx = int(meta.get("pattern_params", {}).get("axis", 0))
         def with_scale(scale: np.ndarray) -> Scene:
             objs = clone_objects(scene_c.objects)
-            objs[0] = apply_scale(objs[0], scale)
+            objs = [apply_scale(obj, scale) for obj in objs]
             return scene_from_objects(objs)
 
         squeeze = 1.0 / math.sqrt(factor)
