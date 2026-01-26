@@ -199,10 +199,7 @@ class R2_3DirectionRotate(Rule):
             reserved=[(objs[0].p, r0), (objs[1].p, r1)],
         )
 
-        dirs = [rotate_dir(0), rotate_dir(theta), rotate_dir(2 * theta)]
-        base_offsets = [obj.p - center for obj in objs]
-        scenes_objs = []
-        for angle in [0.0, theta, 2 * theta]:
+        def rotate_scene(src, angle: float):
             rot = np.array(
                 [
                     [math.cos(angle), -math.sin(angle), 0],
@@ -210,10 +207,17 @@ class R2_3DirectionRotate(Rule):
                     [0, 0, 1],
                 ]
             )
-            placed = clone_objects(objs)
-            for idx, obj in enumerate(placed):
-                obj.p = center + rot @ base_offsets[idx]
-            scenes_objs.append(placed)
+            out = clone_objects(src)
+            for obj in out:
+                obj.p = center + rot @ (obj.p - center)
+            return out
+
+        a_objs = clone_objects(objs)
+        b_objs = rotate_scene(a_objs, theta)
+        c_objs = rotate_scene(b_objs, theta)
+        scenes_objs = [a_objs, b_objs, c_objs]
+        base_dir = (a_objs[1].p - a_objs[0].p) / (np.linalg.norm(a_objs[1].p - a_objs[0].p) + 1e-9)
+        dirs = [rotate_dir(0), rotate_dir(theta), rotate_dir(2 * theta)]
         scenes = [scene_from_objects(x) for x in scenes_objs]
         v = [d.tolist() for d in dirs]
         meta = build_rule_meta(
@@ -892,18 +896,18 @@ class R2_4ContainRatioArithmetic(Rule):
 
     def sample_params(self, rng) -> Dict:
         for _ in range(30):
-            base_ratio = float(rng.uniform(0.2, 0.55))
-            delta = float(rng.uniform(0.18, 0.28)) * (1 if rng.random() < 0.5 else -1)
+            base_ratio = float(rng.uniform(0.12, 0.45))
+            delta = float(rng.uniform(0.12, 0.2)) * (1 if rng.random() < 0.5 else -1)
             r2 = base_ratio + delta
             r3 = base_ratio + 2 * delta
-            if 0.12 <= r2 <= 0.85 and 0.12 <= r3 <= 0.85:
+            if 0.05 <= r2 <= 0.7 and 0.05 <= r3 <= 0.7:
                 return {"base_ratio": base_ratio, "delta": delta}
-        return {"base_ratio": 0.45, "delta": -0.2}
+        return {"base_ratio": 0.35, "delta": -0.15}
 
     def generate_triplet(self, params, rng):
         outer = init_objects(rng, 1, m=2)[0]
         inner = init_objects(rng, 1, m=2)[1]
-        outer.r = np.maximum(outer.r, inner.r * 2.2)
+        outer.r = np.maximum(outer.r, inner.r * 1.6)
         involved = [0, 1]
         base_ratio = float(params["base_ratio"])
         delta = float(params["delta"])
@@ -943,9 +947,9 @@ class R2_4ContainRatioArithmetic(Rule):
 
         def pick_wrong_ratio():
             delta = float(rng.uniform(0.15, 0.3)) * (1 if rng.random() < 0.5 else -1)
-            ratio = float(np.clip(target_ratio + delta, 0.05, 0.95))
+            ratio = float(np.clip(target_ratio + delta, 0.05, 0.7))
             if abs(ratio - target_ratio) < 0.08:
-                ratio = float(np.clip(target_ratio - delta, 0.05, 0.95))
+                ratio = float(np.clip(target_ratio - delta, 0.05, 0.7))
             return ratio
 
         def build_scene(ratio: float, scale_inner: bool = False, tweak_shape: bool = False, tweak_rot: bool = False):
