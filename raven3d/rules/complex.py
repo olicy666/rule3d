@@ -535,7 +535,7 @@ class R3_7PositionCycle(Rule):
         super().__init__("R3-7", RuleDifficulty.COMPLEX, "多对象位置轮换", "球体沿结构按步长轮换")
 
     def sample_params(self, rng) -> Dict:
-        count = int(rng.integers(3, 5))
+        count = int(rng.choice([3, 5]))
         direction = "cw" if rng.random() < 0.5 else "ccw"
         step = int(rng.integers(1, count))
         return {"count": count, "direction": direction, "step": step}
@@ -576,8 +576,10 @@ class R3_7PositionCycle(Rule):
         positions = [scale * (rot @ p) for p in positions]
         objs = [random_object(rng, shape="sphere") for _ in range(count)]
         size_factors = self._distinct_size_factors(rng, count)
-        for obj, factor in zip(objs, size_factors):
+        density_values = self._distinct_densities(rng, count)
+        for obj, factor, density in zip(objs, size_factors, density_values):
             obj.r = obj.r * factor
+            obj.density = density
         involved = list(range(count))
         step = step if direction == "cw" else -step
 
@@ -617,6 +619,7 @@ class R3_7PositionCycle(Rule):
                 "frame_rot_z": frame_angles,
                 "scale": scale,
                 "size_factors": size_factors,
+                "densities": density_values,
             },
             v,
             scenes,
@@ -682,15 +685,30 @@ class R3_7PositionCycle(Rule):
         factors: List[float] = []
         attempts = 0
         while len(factors) < count and attempts < 200:
-            candidate = float(rng.uniform(0.7, 1.4))
-            if all(abs(candidate - f) > 0.15 for f in factors):
+            candidate = float(rng.uniform(0.55, 1.75))
+            if all(abs(candidate - f) > 0.3 for f in factors):
                 factors.append(candidate)
             attempts += 1
         if len(factors) < count:
-            base = float(rng.uniform(0.85, 1.2))
-            step = 0.18
+            base = float(rng.uniform(0.8, 1.25))
+            step = 0.3
             factors = [max(base + step * (i - (count - 1) / 2), 0.3) for i in range(count)]
         return factors
+
+    @staticmethod
+    def _distinct_densities(rng, count: int) -> List[float]:
+        densities: List[float] = []
+        attempts = 0
+        while len(densities) < count and attempts < 200:
+            candidate = float(rng.uniform(0.5, 1.8))
+            if all(abs(candidate - d) > 0.3 for d in densities):
+                densities.append(candidate)
+            attempts += 1
+        if len(densities) < count:
+            base = float(rng.uniform(0.7, 1.3))
+            step = 0.35
+            densities = [max(base + step * (i - (count - 1) / 2), 0.25) for i in range(count)]
+        return densities
 
 
 @dataclass

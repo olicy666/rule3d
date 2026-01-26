@@ -1045,6 +1045,11 @@ class R3_1VolumeSumConserved(Rule):
         vols_a = base_vols
         vols_b = base_vols + deltas
         vols_c = base_vols + 2.0 * deltas
+        
+        # 确保所有体积都大于最小值，避免物体缩放过小导致在点云中消失
+        min_volume = float(np.min(base_vols) * 0.15)  # 最小体积为初始最小体积的 15%
+        vols_b = np.maximum(vols_b, min_volume)
+        vols_c = np.maximum(vols_c, min_volume)
 
         a_objs = clone_objects(objs)
         b_objs = self._apply_target_volumes(a_objs, vols_b)
@@ -1130,7 +1135,9 @@ class R3_1VolumeSumConserved(Rule):
             cur = size(out[i])
             if cur <= 1e-6:
                 continue
-            factor = (max(float(target), 1e-6) / cur) ** (1 / 3)
+            # 确保目标体积不会太小，避免物体缩放过小
+            safe_target = max(float(target), cur * 0.1)  # 最小为当前体积的 10%
+            factor = (safe_target / cur) ** (1 / 3)
             out[i] = apply_scale(out[i], factor)
         return out
 
@@ -1174,6 +1181,14 @@ class R3_1VolumeSumConserved(Rule):
             deltas[down_idx] = -total
             deltas[up_idxs[0]] = total * weight
             deltas[up_idxs[1]] = total * (1.0 - weight)
+            # 确保减少后的体积不会太小（至少为原始体积的 15%）
+            min_vol_after = base_vols[down_idx] * 0.15
+            if base_vols[down_idx] + deltas[down_idx] < min_vol_after:
+                # 调整变化量，确保不会太小
+                max_allowed_reduction = base_vols[down_idx] - min_vol_after
+                if abs(deltas[down_idx]) > max_allowed_reduction:
+                    scale = max_allowed_reduction / abs(deltas[down_idx])
+                    deltas = deltas * scale
             return deltas
 
         up_idx = int(rng.integers(0, 3))
@@ -1191,6 +1206,16 @@ class R3_1VolumeSumConserved(Rule):
         deltas[up_idx] = total
         deltas[down_idxs[0]] = -total * weight
         deltas[down_idxs[1]] = -total * (1.0 - weight)
+        # 确保减少后的体积不会太小（至少为原始体积的 15%）
+        for down_idx in down_idxs:
+            min_vol_after = base_vols[down_idx] * 0.15
+            if base_vols[down_idx] + deltas[down_idx] < min_vol_after:
+                # 调整变化量，确保不会太小
+                max_allowed_reduction = base_vols[down_idx] - min_vol_after
+                if abs(deltas[down_idx]) > max_allowed_reduction:
+                    scale = max_allowed_reduction / abs(deltas[down_idx])
+                    deltas = deltas * scale
+                    break  # 只需要调整一次，因为比例关系会保持
         return deltas
 
 
