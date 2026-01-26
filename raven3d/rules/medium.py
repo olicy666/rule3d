@@ -1478,10 +1478,11 @@ class R1_11AttributeSwap(Rule):
         objs[1].shape = shape
         size_a = size(objs[0])
         size_b = size(objs[1])
-        min_ratio = 3.0
+        min_ratio = 5.0  # 增加最小比例，确保初始差距更大
         ratio = max(size_a, size_b) / max(min(size_a, size_b), 1e-6)
         if ratio < min_ratio:
-            target_ratio = float(rng.uniform(4.0, 6.0))
+            # 增大目标比例范围，确保 ref1 和 ref2 的尺寸差距更大
+            target_ratio = float(rng.uniform(8.0, 12.0))  # 从 [4.0, 6.0] 增加到 [8.0, 12.0]
             if size_a >= size_b:
                 factor = (size_a * target_ratio / size_b) ** (1 / 3)
                 objs[1] = apply_scale(objs[1], factor)
@@ -1636,8 +1637,7 @@ class R1_13DensitySizeCoupled(Rule):
     def sample_params(self, rng) -> Dict:
         scale_up = float(rng.uniform(3.0, 4.2))
         scale_down = float(rng.uniform(0.75, 0.9))
-        factors = [scale_up, scale_down] if rng.random() < 0.5 else [scale_down, scale_up]
-        return {"density_factors": factors}
+        return {"scale_factors": [scale_down, scale_up]}
 
     def generate_triplet(self, params, rng):
         objs = init_objects(rng, 2, m=2)
@@ -1648,24 +1648,21 @@ class R1_13DensitySizeCoupled(Rule):
         objs[0].p = np.array([-base_offset, base_y, base_z])
         objs[1].p = np.array([base_offset, -base_y, -base_z])
 
-        factors = [float(f) for f in params.get("density_factors", [3.2, 0.8])]
+        factors = [float(f) for f in params.get("scale_factors", [0.85, 3.2])]
         if len(factors) != 2:
-            factors = [3.2, 0.8]
-        base_low = float(rng.uniform(0.9, 1.1))
-        base_high = base_low * 2.0
-        if factors[0] >= factors[1]:
-            objs[0].density = base_high
-            objs[1].density = base_low
-        else:
-            objs[0].density = base_low
-            objs[1].density = base_high
+            factors = [0.85, 3.2]
+        if factors[1] <= factors[0]:
+            factors = [min(factors), max(factors)]
+        base_low = float(rng.uniform(0.95, 1.05))
+        ratio = float(rng.uniform(1.1, 1.25))
+        objs[0].density = base_low
+        objs[1].density = base_low * ratio
         scale_factors = [f ** (1.0 / 3.0) for f in factors]
 
         def step_objs(src):
             stepped = []
-            for obj, den_factor, sc_factor in zip(src, factors, scale_factors):
-                updated = apply_density(obj, den_factor)
-                updated = apply_scale(updated, sc_factor)
+            for obj, sc_factor in zip(src, scale_factors):
+                updated = apply_scale(obj, sc_factor)
                 stepped.append(updated)
             return stepped
 
@@ -1686,7 +1683,7 @@ class R1_13DensitySizeCoupled(Rule):
             ["d", "r"],
             ["den(Oi)", "size(Oi)"],
             "coupled",
-            {"density_factors": factors},
+            {"scale_factors": factors},
             v,
             scenes,
         )
@@ -1697,9 +1694,9 @@ class R1_13DensitySizeCoupled(Rule):
             return [], []
         objs = clone_objects(scene_c.objects)
         params = meta.get("pattern_params", {})
-        factors = params.get("density_factors")
+        factors = params.get("scale_factors")
         if factors is None or len(factors) != 2:
-            factors = [1.3, 0.75]
+            factors = [0.85, 3.2]
         scale_factors = [float(f) ** (1.0 / 3.0) for f in factors]
 
         wrong_scale = clone_objects(objs)
@@ -1708,7 +1705,9 @@ class R1_13DensitySizeCoupled(Rule):
 
         wrong_density = clone_objects(objs)
         idx = int(rng.integers(0, len(wrong_density)))
-        wrong_density[idx] = apply_density(wrong_density[idx], 1.0 / float(factors[idx]))
+        factor = 1.25 if rng.random() < 0.5 else 0.8
+        wrong_density[idx] = wrong_density[idx].copy()
+        wrong_density[idx].density = max(wrong_density[idx].density * factor, 1e-3)
 
         swap_sizes = clone_objects(objs)
         swap_sizes[0].r, swap_sizes[1].r = swap_sizes[1].r.copy(), swap_sizes[0].r.copy()
@@ -1718,7 +1717,7 @@ class R1_13DensitySizeCoupled(Rule):
             scene_from_objects(wrong_density),
             scene_from_objects(swap_sizes),
         ]
-        reasons = ["尺寸未随密度延续变化", "密度变化方向错误", "尺寸与密度对应关系被打乱"]
+        reasons = ["尺寸未随密度大小变化", "密度被错误改动", "尺寸与密度对应关系被打乱"]
         return distractors, reasons
 
 
