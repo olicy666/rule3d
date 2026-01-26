@@ -17,6 +17,7 @@ from .simple import (
     R2_2AnisotropicGeometric,
 )
 from .utils import (
+    aabb,
     ang,
     apply_density,
     apply_rotation,
@@ -1457,10 +1458,7 @@ class R4_3NodeFusionEvolution(Rule):
             obj_a = objs[idx_a]
             obj_b = objs[idx_b]
             base = obj_a.copy()
-            target = size(obj_a) + size(obj_b)
-            cur = max(size(base), 1e-6)
-            scale = (target / cur) ** (1 / 3)
-            base = apply_scale(base, scale)
+            base.r = obj_a.r + obj_b.r
             base.p = (obj_a.p + obj_b.p) / 2.0
             base.rotation = rng.uniform(-math.pi / 4, math.pi / 4, size=3)
             fused.append(base)
@@ -1734,9 +1732,26 @@ class R4_5ContactInfection(Rule):
         min_idx = int(np.argmin(sizes))
         if sizes[min_idx] <= 1e-6:
             return
-        if sizes[max_idx] / sizes[min_idx] < 1.25:
-            scale = float(rng.uniform(1.35, 1.6))
+        target_ratio = float(rng.uniform(1.8, 2.4))
+        cur_ratio = sizes[max_idx] / sizes[min_idx]
+        if cur_ratio < target_ratio:
+            scale = (target_ratio / cur_ratio) ** (1 / 3)
             objs[max_idx] = apply_scale(objs[max_idx], scale)
+
+    @staticmethod
+    def _ensure_density_contrast(objs: Sequence, rng) -> None:
+        if len(objs) < 2:
+            return
+        sizes = np.array([size(o) for o in objs], dtype=float)
+        max_idx = int(np.argmax(sizes))
+        min_idx = int(np.argmin(sizes))
+        if max_idx == min_idx:
+            min_idx = (max_idx + 1) % len(objs)
+        low = max(float(objs[min_idx].density) * float(rng.uniform(0.4, 0.7)), 1e-3)
+        target_ratio = float(rng.uniform(1.8, 2.4))
+        high = max(low * target_ratio, 1e-3)
+        objs[min_idx].density = low
+        objs[max_idx].density = high
 
     @staticmethod
     def _infect(scene: Scene, attrs: Sequence[str], rng) -> tuple[Scene, int]:
@@ -1771,6 +1786,7 @@ class R4_5ContactInfection(Rule):
         attrs = list(params.get("infect_attrs", []))
         objs = [random_object(rng) for _ in range(count)]
         self._ensure_size_contrast(objs, rng)
+        self._ensure_density_contrast(objs, rng)
         _separate_objects_no_contact(objs, rng, gap=0.25)  # 增大间距，让物体分开得更远
         scene_a = scene_from_objects(objs)
 
@@ -1932,10 +1948,11 @@ class R4_6AdvancedOrbitalRotation(Rule):
 
     def generate_triplet(self, params, rng):
         count = 3
-        gap = 0.06
+        gap = 0.3  # 增大间距，确保几何体之间不得有任何接触
         for _ in range(40):
             objs = [random_object(rng) for _ in range(count)]
-            radii = self._unique_samples(rng, count, 0.45, 1.2, 0.12)
+            # 增加 radii 之间的最小间距，确保初始位置就有足够距离，避免旋转后接触
+            radii = self._unique_samples(rng, count, 0.5, 1.4, 0.3)  # 增大最小间距和范围
             angles = [float(rng.uniform(0.0, 2 * math.pi)) for _ in range(count)]
             delta_base = float(rng.uniform(math.pi / 8, math.pi / 4))
             deltas = self._unique_samples(rng, count, delta_base * 0.7, delta_base * 1.3, 0.1)
@@ -1944,6 +1961,9 @@ class R4_6AdvancedOrbitalRotation(Rule):
 
             for obj, r, ang in zip(objs, radii, angles):
                 obj.p = np.array([r * math.cos(ang), r * math.sin(ang), 0.0])
+            
+            # 确保初始位置没有接触
+            _separate_objects_no_contact(objs, rng, gap=gap)
 
             order = [idx for idx, _ in sorted(enumerate(radii), key=lambda kv: kv[1])]
             center_a = int(order[0])
@@ -1954,6 +1974,8 @@ class R4_6AdvancedOrbitalRotation(Rule):
             scene_a = scene_from_objects(clone_objects(objs))
             scene_b = self._rotate_step_scene(scene_a, center_b, deltas)
             scene_c = self._rotate_step_scene(scene_b, center_c, deltas)
+            
+            # 检查所有帧是否都没有接触（使用更大的 gap 确保安全距离）
             if (
                 _all_non_contact(scene_a.objects, gap)
                 and _all_non_contact(scene_b.objects, gap)
@@ -2330,33 +2352,37 @@ class R4_9SoftBodySqueeze(Rule):
     def _position_pressers(pressers: Sequence[ObjectState], sphere: ObjectState, rng) -> List[ObjectState]:
         """
         将挤压物体垂直堆叠在球体上方，像积木一样一个叠一个，确保接触但不穿模。
-        使用负间隙确保物体之间有接触。
+        使用 AABB 边界框来精确计算接触位置。
         """
         placed = []
-        # 计算球体顶部位置（球体中心 y + 球体半径 y）
-        # 对于轴对齐边界框，物体顶部 = p[1] + r[1]，底部 = p[1] - r[1]
-        sphere_top_y = sphere.p[1] + sphere.r[1]
+        # 根据 aabb 函数：half = r / 2.0, min = p - half, max = p + half
+        # 所以：物体顶部 y = p[1] + r[1]/2，底部 y = p[1] - r[1]/2
+        
+        # 计算球体顶部位置（使用 AABB）
+        sphere_min, sphere_max = aabb(sphere)
+        sphere_top_y = sphere_max[1]
         
         # 当前堆叠的顶部位置
         current_top_y = sphere_top_y
         
-        # 使用小的负间隙确保物体之间有接触（稍微重叠）
-        contact_overlap = -0.02  # 负值表示重叠，确保接触
+        # 使用重叠确保物体之间有接触（重叠，确保挤压效果明显）
+        contact_overlap = -0.08  # 负值表示重叠，确保接触和挤压效果明显
         
         for i, obj in enumerate(pressers):
-            # 计算物体在 y 方向的高度（r[1] 是 y 轴方向的半高）
-            obj_half_height = obj.r[1]
+            # 根据 aabb：物体底部 = p[1] - r[1]/2，顶部 = p[1] + r[1]/2
+            # 物体半高 = r[1]/2
             
-            # 物体底部应该接触前一个物体的顶部
-            # 物体底部 y = obj_center_y - obj_half_height
-            # 我们希望：obj_center_y - obj_half_height = current_top_y + contact_overlap
-            # 所以：obj_center_y = current_top_y + contact_overlap + obj_half_height
+            # 物体底部应该接触前一个物体的顶部（稍微重叠）
+            # 物体底部 y = obj_center_y - r[1]/2
+            # 我们希望：obj_center_y - r[1]/2 = current_top_y + contact_overlap
+            # 所以：obj_center_y = current_top_y + contact_overlap + r[1]/2
+            obj_half_height = obj.r[1] / 2.0
             obj_center_y = current_top_y + contact_overlap + obj_half_height
             
             # X 和 Z 位置：可以稍微随机偏移，但保持在球体中心附近
             # 为了更真实，可以让物体稍微偏离中心，但不要太多
-            offset_x = float(rng.uniform(-0.15, 0.15))
-            offset_z = float(rng.uniform(-0.15, 0.15))
+            offset_x = float(rng.uniform(-0.12, 0.12))
+            offset_z = float(rng.uniform(-0.12, 0.12))
             
             new_obj = obj.copy()
             new_obj.p = np.array([
@@ -2367,8 +2393,9 @@ class R4_9SoftBodySqueeze(Rule):
             
             placed.append(new_obj)
             
-            # 更新堆叠顶部位置：当前物体顶部 = 物体中心 + 物体半高
-            current_top_y = obj_center_y + obj_half_height
+            # 更新堆叠顶部位置：使用新物体的实际 AABB 顶部
+            new_obj_min, new_obj_max = aabb(new_obj)
+            current_top_y = new_obj_max[1]
         
         return placed
 
