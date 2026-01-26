@@ -1470,7 +1470,12 @@ class R1_11AttributeSwap(Rule):
         base_z = float(rng.uniform(-0.2, 0.2))
         objs[0].p = np.array([-base_offset, base_y, base_z])
         objs[1].p = np.array([base_offset, -base_y, -base_z])
-        objs[1].shape = objs[0].shape
+        allowed_shapes = [s for s in SHAPES if s not in ("sphere", "ellipsoid")]
+        if not allowed_shapes:
+            allowed_shapes = [s for s in SHAPES if s != "sphere"]
+        shape = str(rng.choice(allowed_shapes))
+        objs[0].shape = shape
+        objs[1].shape = shape
         size_a = size(objs[0])
         size_b = size(objs[1])
         min_ratio = 2.2
@@ -1646,6 +1651,14 @@ class R1_13DensitySizeCoupled(Rule):
         factors = [float(f) for f in params.get("density_factors", [3.2, 0.6])]
         if len(factors) != 2:
             factors = [3.2, 0.6]
+        base_low = float(rng.uniform(0.7, 0.9))
+        base_high = float(rng.uniform(1.4, 1.7))
+        if factors[0] >= factors[1]:
+            objs[0].density = base_high
+            objs[1].density = base_low
+        else:
+            objs[0].density = base_low
+            objs[1].density = base_high
         scale_factors = [f ** (1.0 / 3.0) for f in factors]
 
         def step_objs(src):
