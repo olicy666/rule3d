@@ -22,6 +22,7 @@ from .utils import (
     apply_rotation,
     apply_scale,
     apply_translation,
+    approx_radius,
     aspect_ratio,
     build_rule_meta,
     centroid,
@@ -44,6 +45,41 @@ from ..scene import Scene, ObjectState
 def _unit_vector(rng: np.random.Generator) -> np.ndarray:
     v = rng.normal(size=3)
     return v / (np.linalg.norm(v) + 1e-9)
+
+
+def _spread_objects(objs: Sequence[ObjectState], rng) -> None:
+    if len(objs) < 2:
+        return
+    sizes = [np.linalg.norm(o.r) for o in objs]
+    avg_size = float(np.mean(sizes)) if sizes else 0.0
+    min_sep = max(0.16, 0.25 * avg_size)
+    min_sep /= max(1.0, math.sqrt(len(objs)) / 1.5)
+    for _ in range(10):
+        moved = False
+        for i in range(len(objs)):
+            for j in range(i + 1, len(objs)):
+                delta = objs[j].p - objs[i].p
+                dist = float(np.linalg.norm(delta))
+                if dist < min_sep:
+                    direction_vec = _unit_vector(rng) if dist < 1e-6 else delta / dist
+                    shift = 0.5 * (min_sep - dist)
+                    objs[i].p = objs[i].p - direction_vec * shift
+                    objs[j].p = objs[j].p + direction_vec * shift
+                    moved = True
+        if not moved:
+            break
+
+
+def _min_pairwise_distance(objs: Sequence[ObjectState]) -> float:
+    if len(objs) < 2:
+        return float("inf")
+    min_dist = float("inf")
+    for i in range(len(objs)):
+        for j in range(i + 1, len(objs)):
+            dist = float(np.linalg.norm(objs[i].p - objs[j].p))
+            if dist < min_dist:
+                min_dist = dist
+    return min_dist
 
 
 @dataclass
@@ -1181,10 +1217,6 @@ def _value_dist_set(scene: Scene, _params: Dict, _base_meta: Dict, _state: Dict)
     ]
 
 
-def _r4_state_r3_3(scene_a: Scene, _scene_b: Scene, _scene_c: Scene, _params: Dict, _base_meta: Dict) -> Dict:
-    return {"base_cent": centroid(scene_a.objects)}
-
-
 def _build_r4_candidates() -> List[_R4Candidate]:
     return [
         _R4Candidate(R1_1ScaleArithmetic(), _advance_r1_1, _value_size),
@@ -1192,11 +1224,6 @@ def _build_r4_candidates() -> List[_R4Candidate]:
         _R4Candidate(R1_3FixedAxisRotation(), _advance_r1_3, _value_rotation_axis),
         _R4Candidate(R1_5TranslationArithmetic(), _advance_r1_5, _value_position),
         _R4Candidate(R1_6DensityArithmetic(), _advance_r1_6, _value_density),
-        _R4Candidate(R2_1DistanceGeometric(), _advance_r2_1, _value_dist),
-        _R4Candidate(R2_2AnisotropicGeometric(), _advance_r2_2, _value_aspect_ratio),
-        _R4Candidate(R2_3DirectionRotate(), _advance_r2_3, _value_direction),
-        _R4Candidate(R3_2OrderingCycle(), _advance_r3_2, _value_order),
-        _R4Candidate(R3_3DistanceVectorGeometric(), _advance_r3_3, _value_dist_set, _r4_state_r3_3),
     ]
 
 
@@ -1271,7 +1298,7 @@ class R4_2NodeSplitEvolution(Rule):
             else:
                 direction_vec = direction_vec / norm
             radius = 0.6 * float(np.linalg.norm(base.r))
-            offset_mag = max(0.08, radius * 0.35)
+            offset_mag = max(0.12, radius * 0.35)
             offset = direction_vec * offset_mag
             for sign in (-1.0, 1.0):
                 child = base.copy()
@@ -1279,6 +1306,7 @@ class R4_2NodeSplitEvolution(Rule):
                 child.p = child.p + sign * offset
                 child.rotation = rng.uniform(-math.pi / 4, math.pi / 4, size=3)
                 out.append(child)
+        _spread_objects(out, rng)
         rng.shuffle(out)
         return out
 
@@ -1326,8 +1354,8 @@ class R4_2NodeSplitEvolution(Rule):
 
         wrong_density = clone_objects(objs)
         idx_density = int(rng.integers(0, len(wrong_density)))
-        density_factor = float(rng.uniform(0.6, 0.85) if rng.random() < 0.5 else rng.uniform(1.2, 1.5))
-        size_factor = float(rng.uniform(0.7, 0.9) if rng.random() < 0.5 else rng.uniform(1.15, 1.4))
+        density_factor = float(rng.uniform(0.4, 0.65) if rng.random() < 0.5 else rng.uniform(1.6, 2.2))
+        size_factor = float(rng.uniform(0.55, 0.75) if rng.random() < 0.5 else rng.uniform(1.35, 1.7))
         adjusted = apply_scale(wrong_density[idx_density], size_factor)
         adjusted.density = max(adjusted.density * density_factor, 1e-3)
         wrong_density[idx_density] = adjusted
@@ -1385,6 +1413,7 @@ class R4_3NodeFusionEvolution(Rule):
             if idx not in used:
                 fused.append(obj.copy())
 
+        _spread_objects(fused, rng)
         rng.shuffle(fused)
         return fused
 
@@ -1443,8 +1472,8 @@ class R4_3NodeFusionEvolution(Rule):
 
         wrong_density = clone_objects(objs)
         idx_density = int(rng.integers(0, len(wrong_density)))
-        density_factor = float(rng.uniform(0.6, 0.85) if rng.random() < 0.5 else rng.uniform(1.2, 1.5))
-        size_factor = float(rng.uniform(0.7, 0.9) if rng.random() < 0.5 else rng.uniform(1.15, 1.4))
+        density_factor = float(rng.uniform(0.4, 0.65) if rng.random() < 0.5 else rng.uniform(1.6, 2.2))
+        size_factor = float(rng.uniform(0.55, 0.75) if rng.random() < 0.5 else rng.uniform(1.35, 1.7))
         adjusted = apply_scale(wrong_density[idx_density], size_factor)
         adjusted.density = max(adjusted.density * density_factor, 1e-3)
         wrong_density[idx_density] = adjusted
@@ -1707,6 +1736,7 @@ class R4_5ContactInfection(Rule):
         if not scene_c.objects:
             return [], []
         objs = clone_objects(scene_c.objects)
+        attrs = meta.get("pattern_params", {}).get("infect_attrs", [])
 
         if len(objs) > 2:
             drop = rng.choice(len(objs), size=2, replace=False)
@@ -1749,7 +1779,7 @@ class R4_6AdvancedOrbitalRotation(Rule):
         super().__init__("R4-6", RuleDifficulty.COMPLEX, "进阶行星公转", "公转中心由内到外轮流切换")
 
     def sample_params(self, rng) -> Dict:
-        count = int(rng.integers(3, 7))
+        count = int(rng.integers(4, 7))
         return {"count": count}
 
     @staticmethod
@@ -1808,23 +1838,32 @@ class R4_6AdvancedOrbitalRotation(Rule):
 
     def generate_triplet(self, params, rng):
         count = int(params.get("count", 3))
-        objs = [random_object(rng) for _ in range(count)]
-        radii = self._unique_samples(rng, count, 0.4, 1.1, 0.08)
-        angles = [float(rng.uniform(0.0, 2 * math.pi)) for _ in range(count)]
-        delta_base = float(rng.uniform(math.pi / 8, math.pi / 4))
-        deltas = self._unique_samples(rng, count, delta_base * 0.7, delta_base * 1.3, 0.1)
-        sign = 1.0 if rng.random() < 0.5 else -1.0
-        deltas = [sign * d for d in deltas]
+        count = max(4, count)
+        min_sep = 0.12
+        for _ in range(40):
+            objs = [random_object(rng) for _ in range(count)]
+            radii = self._unique_samples(rng, count, 0.45, 1.2, 0.12)
+            angles = [float(rng.uniform(0.0, 2 * math.pi)) for _ in range(count)]
+            delta_base = float(rng.uniform(math.pi / 8, math.pi / 4))
+            deltas = self._unique_samples(rng, count, delta_base * 0.7, delta_base * 1.3, 0.1)
+            sign = 1.0 if rng.random() < 0.5 else -1.0
+            deltas = [sign * d for d in deltas]
 
-        for obj, r, ang in zip(objs, radii, angles):
-            obj.p = np.array([r * math.cos(ang), r * math.sin(ang), 0.0])
+            for obj, r, ang in zip(objs, radii, angles):
+                obj.p = np.array([r * math.cos(ang), r * math.sin(ang), 0.0])
 
-        order = [idx for idx, _ in sorted(enumerate(radii), key=lambda kv: kv[1])]
-        center_indices = [order[0], order[1], order[2]]
+            order = [idx for idx, _ in sorted(enumerate(radii), key=lambda kv: kv[1])]
+            center_indices = [order[0], order[1], order[2]]
 
-        scene_a = scene_from_objects(clone_objects(objs))
-        scene_b = self._rotate_step_scene(scene_a, center_indices[1], deltas)
-        scene_c = self._rotate_step_scene(scene_b, center_indices[2], deltas)
+            scene_a = scene_from_objects(clone_objects(objs))
+            scene_b = self._rotate_step_scene(scene_a, center_indices[1], deltas)
+            scene_c = self._rotate_step_scene(scene_b, center_indices[2], deltas)
+            if (
+                _min_pairwise_distance(scene_a.objects) >= min_sep
+                and _min_pairwise_distance(scene_b.objects) >= min_sep
+                and _min_pairwise_distance(scene_c.objects) >= min_sep
+            ):
+                break
         v = center_indices
         involved = list(range(len(scene_c.objects)))
         meta = build_rule_meta(
@@ -1862,7 +1901,7 @@ class R4_6AdvancedOrbitalRotation(Rule):
         skip_idx = center_order[3] if len(center_order) > 3 else center_indices[2]
         wrong_skip = self._rotate_step_scene(scene_b, skip_idx, deltas)
         wrong_hold = self._rotate_step_scene(scene_b, center_indices[1], deltas)
-        scaled = [d * 0.5 for d in deltas]
+        scaled = [d * 0.3 for d in deltas]
         wrong_angle = self._rotate_step_scene(scene_b, center_indices[2], scaled)
 
         distractors = [wrong_skip, wrong_hold, wrong_angle]
@@ -1915,7 +1954,7 @@ class R4_7SymmetryTransform(Rule):
         out = clone_objects(objs)
         if action == "translate":
             delta_vec = np.array(delta, dtype=float)
-            mirror_delta = np.array([-delta_vec[0], delta_vec[1], delta_vec[2]])
+            mirror_delta = np.array([-delta_vec[0], -delta_vec[1], delta_vec[2]])
             for idx in left_idx:
                 out[idx] = apply_translation(out[idx], delta_vec)
             for idx in right_idx:
@@ -2026,42 +2065,75 @@ class R4_8DampedBounce(Rule):
         super().__init__("R4-8", RuleDifficulty.COMPLEX, "阻尼弹跳", "弹跳高度按衰减比例递减")
 
     def sample_params(self, rng) -> Dict:
-        height = float(rng.uniform(0.9, 1.6))
-        ratio = float(rng.uniform(0.35, 0.7))
-        return {"height": height, "ratio": ratio}
+        count = int(rng.integers(1, 4))
+        return {"count": count}
+
+    @staticmethod
+    def _sample_positions(rng, count: int) -> List[np.ndarray]:
+        min_sep = 0.5
+        positions: List[np.ndarray] = []
+        attempts = 0
+        while len(positions) < count and attempts < 200:
+            candidate = np.array([rng.uniform(-0.6, 0.6), rng.uniform(-0.6, 0.6)], dtype=float)
+            if all(np.linalg.norm(candidate - p) >= min_sep for p in positions):
+                positions.append(candidate)
+            attempts += 1
+            if attempts % 40 == 0 and len(positions) < count:
+                min_sep = max(0.3, min_sep * 0.85)
+        if len(positions) < count:
+            angles = np.linspace(0, 2 * math.pi, count, endpoint=False)
+            positions = [np.array([0.6 * math.cos(a), 0.6 * math.sin(a)], dtype=float) for a in angles]
+        return positions
+
+    @staticmethod
+    def _sample_ratios(rng, count: int) -> List[float]:
+        ratios: List[float] = []
+        attempts = 0
+        while len(ratios) < count and attempts < 200:
+            candidate = float(rng.uniform(0.35, 0.7))
+            if all(abs(candidate - r) >= 0.06 for r in ratios):
+                ratios.append(candidate)
+            attempts += 1
+        if len(ratios) < count:
+            ratios = np.linspace(0.38, 0.68, count).tolist()
+        return ratios
+
+    @staticmethod
+    def _with_height(obj: ObjectState, h: float) -> ObjectState:
+        updated = obj.copy()
+        updated.p = np.array([updated.p[0], h, updated.p[2]], dtype=float)
+        return updated
 
     def generate_triplet(self, params, rng):
-        height = float(params.get("height", 1.0))
-        ratio = float(params.get("ratio", 0.5))
-        x = float(rng.uniform(-0.3, 0.3))
-        z = float(rng.uniform(-0.3, 0.3))
+        count = int(params.get("count", 1))
+        count = min(max(count, 1), 3)
+        positions = self._sample_positions(rng, count)
+        ratios = self._sample_ratios(rng, count)
+        heights = [float(rng.uniform(0.9, 1.6)) for _ in range(count)]
 
-        base = random_object(rng, shape="sphere")
-        base.p = np.array([x, height, z])
+        a_objs = []
+        for i in range(count):
+            base = random_object(rng, shape="sphere")
+            base.p = np.array([positions[i][0], heights[i], positions[i][1]], dtype=float)
+            a_objs.append(base)
 
-        def with_height(h: float) -> ObjectState:
-            obj = base.copy()
-            obj.p = np.array([x, h, z], dtype=float)
-            return obj
+        h2_list = [heights[i] * ratios[i] for i in range(count)]
+        h3_list = [h2_list[i] * ratios[i] for i in range(count)]
 
-        h1 = height
-        h2 = height * ratio
-        h3 = h2 * ratio
-        a_objs = [with_height(h1)]
-        b_objs = [with_height(h2)]
-        c_objs = [with_height(h3)]
+        b_objs = [self._with_height(obj, h2_list[i]) for i, obj in enumerate(a_objs)]
+        c_objs = [self._with_height(obj, h3_list[i]) for i, obj in enumerate(a_objs)]
         scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
-        v = [h1, h2, h3]
-        involved = [0]
+        v = [heights, h2_list, h3_list]
+        involved = list(range(count))
         meta = build_rule_meta(
             self,
             "R4",
-            1,
+            count,
             involved,
             ["p"],
-            ["height(O0)"],
+            ["height(Oi)"],
             "damped-bounce",
-            {"ratio": ratio},
+            {"count": count, "ratios": ratios},
             v,
             scenes,
         )
@@ -2070,32 +2142,43 @@ class R4_8DampedBounce(Rule):
     def make_distractors(self, scene_c: Scene, rng, meta: Dict) -> Tuple[list[Scene], list[str]]:
         if not scene_c.objects:
             return [], []
-        params = meta.get("pattern_params", {})
-        ratio = float(params.get("ratio", 0.5))
         v = meta.get("v", {})
-        h2 = v.get("v2", [None])[0]
-        h3 = v.get("v3", [scene_c.objects[0].p[1]])[0]
-        if h2 is None:
-            h2 = float(h3) / max(ratio, 1e-6)
-        h2 = float(h2)
-        x, _y, z = scene_c.objects[0].p.tolist()
+        h3_list = v.get("v3", [])
+        if len(h3_list) != len(scene_c.objects):
+            h3_list = [float(obj.p[1]) for obj in scene_c.objects]
 
-        wrong_ratios = [
-            ratio * float(rng.uniform(1.35, 1.7)),
-            ratio * float(rng.uniform(0.4, 0.7)),
-            ratio * float(rng.uniform(0.9, 1.1)) * -1.0,
+        high_factor = float(rng.uniform(1.35, 1.7))
+        low_factor = float(rng.uniform(0.55, 0.75))
+        wrong_high = [max(h * high_factor, 0.02) for h in h3_list]
+        wrong_low = [max(h * low_factor, 0.02) for h in h3_list]
+
+        def build(heights: Sequence[float]) -> Scene:
+            objs = clone_objects(scene_c.objects)
+            for obj, h in zip(objs, heights):
+                obj.p = np.array([obj.p[0], max(float(h), 0.02), obj.p[2]], dtype=float)
+            return scene_from_objects(objs)
+
+        wrong_shape_size = clone_objects(scene_c.objects)
+        idx = int(rng.integers(0, len(wrong_shape_size)))
+        if rng.random() < 0.5:
+            shape_choices = [s for s in SHAPES if s != wrong_shape_size[idx].shape]
+            if shape_choices:
+                wrong_shape_size[idx] = switch_shape(wrong_shape_size[idx], str(rng.choice(shape_choices)))
+            shape_size_reason = "形状变化破坏规则"
+        else:
+            size_factor = float(rng.uniform(0.45, 0.6) if rng.random() < 0.5 else rng.uniform(1.6, 2.0))
+            wrong_shape_size[idx] = apply_scale(wrong_shape_size[idx], size_factor)
+            shape_size_reason = "尺寸变化破坏规则"
+
+        distractors = [
+            build(wrong_high),
+            build(wrong_low),
+            scene_from_objects(wrong_shape_size),
         ]
-
-        def build(h: float) -> Scene:
-            obj = scene_c.objects[0].copy()
-            obj.p = np.array([x, max(float(h), 0.02), z], dtype=float)
-            return scene_from_objects([obj])
-
-        distractors = [build(h2 * r) for r in wrong_ratios]
         reasons = [
             "衰减比例偏小，弹跳高度过高",
             "衰减比例偏大，弹跳高度过低",
-            "衰减方向错误",
+            shape_size_reason,
         ]
         return distractors, reasons
 
@@ -2131,13 +2214,19 @@ class R4_9SoftBodySqueeze(Rule):
     @staticmethod
     def _position_pressers(pressers: Sequence[ObjectState], sphere: ObjectState, rng) -> List[ObjectState]:
         placed = []
-        radius = float(np.linalg.norm(sphere.r)) * 0.45
         for i, obj in enumerate(pressers):
             angle = float(2 * math.pi * i / max(len(pressers), 1))
-            jitter = rng.uniform(-0.2, 0.2, size=2)
-            x = radius * math.cos(angle) + jitter[0]
-            z = radius * math.sin(angle) + jitter[1]
-            y = sphere.r[1] * 0.75 + obj.r[1] * 0.35
+            angle += float(rng.uniform(-0.25, 0.25))
+            y_jitter = float(rng.uniform(-0.2, 0.2))
+            direction_vec = np.array([math.cos(angle), y_jitter, math.sin(angle)], dtype=float)
+            norm = float(np.linalg.norm(direction_vec))
+            if norm < 1e-6:
+                direction_vec = np.array([1.0, 0.0, 0.0], dtype=float)
+            else:
+                direction_vec = direction_vec / norm
+            gap = float(rng.uniform(0.01, 0.04))
+            distance = approx_radius(sphere) + approx_radius(obj) + gap
+            x, y, z = (sphere.p + direction_vec * distance).tolist()
             new_obj = obj.copy()
             new_obj.p = np.array([x, y, z], dtype=float)
             placed.append(new_obj)
@@ -2303,8 +2392,8 @@ class R4_10DominoChain(Rule):
         fallen = self._tilt_angle(math.pi / 2, direction)
 
         a_objs = self._apply_angles(objs, {start: tilt})
-        b_objs = self._apply_angles(objs, {start: fallen, next1: tilt})
-        c_objs = self._apply_angles(objs, {next1: fallen, next2: tilt})
+        b_objs = self._apply_angles(a_objs, {start: fallen, next1: tilt})
+        c_objs = self._apply_angles(b_objs, {next1: fallen, next2: tilt})
 
         scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
         v = [
