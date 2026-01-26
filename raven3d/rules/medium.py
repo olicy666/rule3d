@@ -1473,10 +1473,21 @@ class R1_11AttributeSwap(Rule):
         if objs[0].shape == objs[1].shape:
             options = [s for s in SHAPES if s != objs[0].shape]
             objs[1].shape = str(rng.choice(options))
-        if abs(size(objs[0]) - size(objs[1])) < 0.12 * size(objs[0]):
-            objs[1] = apply_scale(objs[1], float(rng.uniform(1.25, 1.55)))
-        if float(np.linalg.norm(objs[0].rotation - objs[1].rotation)) < 0.25:
-            delta_rot = rng.uniform(math.pi / 8, math.pi / 4, size=3)
+        size_a = size(objs[0])
+        size_b = size(objs[1])
+        min_ratio = 2.2
+        ratio = max(size_a, size_b) / max(min(size_a, size_b), 1e-6)
+        if ratio < min_ratio:
+            target_ratio = float(rng.uniform(2.6, 3.8))
+            if size_a >= size_b:
+                factor = (size_a * target_ratio / size_b) ** (1 / 3)
+                objs[1] = apply_scale(objs[1], factor)
+            else:
+                factor = (size_b * target_ratio / size_a) ** (1 / 3)
+                objs[0] = apply_scale(objs[0], factor)
+        min_rot_diff = 0.9
+        if float(np.linalg.norm(objs[0].rotation - objs[1].rotation)) < min_rot_diff:
+            delta_rot = rng.uniform(math.pi / 3, math.pi / 2, size=3)
             delta_rot = delta_rot * rng.choice([-1, 1], size=3)
             objs[1] = apply_rotation(objs[1], delta_rot)
 
@@ -1620,8 +1631,8 @@ class R1_13DensitySizeCoupled(Rule):
         super().__init__("R1-13", RuleDifficulty.MEDIUM, "密度驱动缩放", "密度越大缩放越大，密度越小缩放越小")
 
     def sample_params(self, rng) -> Dict:
-        scale_up = float(rng.uniform(1.25, 1.6))
-        scale_down = float(rng.uniform(0.6, 0.85))
+        scale_up = float(rng.uniform(3.0, 4.2))
+        scale_down = float(rng.uniform(0.22, 0.4))
         factors = [scale_up, scale_down] if rng.random() < 0.5 else [scale_down, scale_up]
         return {"density_factors": factors}
 
@@ -1634,9 +1645,9 @@ class R1_13DensitySizeCoupled(Rule):
         objs[0].p = np.array([-base_offset, base_y, base_z])
         objs[1].p = np.array([base_offset, -base_y, -base_z])
 
-        factors = [float(f) for f in params.get("density_factors", [1.3, 0.75])]
+        factors = [float(f) for f in params.get("density_factors", [3.2, 0.3])]
         if len(factors) != 2:
-            factors = [1.3, 0.75]
+            factors = [3.2, 0.3]
         scale_factors = [f ** (1.0 / 3.0) for f in factors]
 
         def step_objs(src):

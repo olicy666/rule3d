@@ -985,10 +985,11 @@ class R1_17ShapeCountArithmetic(Rule):
     def generate_triplet(self, params, rng):
         shape_count = int(rng.integers(2, 5))
         shapes = rng.choice(SHAPES, size=shape_count, replace=False).tolist()
+        max_total = 6
 
         while True:
-            total_a = int(rng.integers(shape_count, 7))
-            max_delta_sum = (8 - total_a) // 2
+            total_a = int(rng.integers(shape_count, max_total + 1))
+            max_delta_sum = (max_total - total_a) // 2
             if max_delta_sum >= 1:
                 sum_delta = int(rng.integers(1, max_delta_sum + 1))
                 break
