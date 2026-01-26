@@ -10,10 +10,9 @@ from .base import Rule, RuleDifficulty
 from .medium import R2_1DistanceGeometric, R2_3DirectionRotate, R3_2OrderingCycle, R3_3DistanceVectorGeometric
 from .simple import (
     R1_1ScaleArithmetic,
-    R1_2AxisPermutation,
-    R1_3FixedAxisRotation,
-    R1_5TranslationArithmetic,
-    R1_6DensityArithmetic,
+    R1_2FixedAxisRotation,
+    R1_4TranslationArithmetic,
+    R1_5DensityArithmetic,
     R2_2AnisotropicGeometric,
 )
 from .utils import (
@@ -115,9 +114,9 @@ def _all_non_contact(objs: Sequence[ObjectState], gap: float = 0.05) -> bool:
 
 
 @dataclass
-class R1_10ScaleRotateCoupled(Rule):
+class R1_9ScaleRotateCoupled(Rule):
     def __init__(self) -> None:
-        super().__init__("R1-10", RuleDifficulty.COMPLEX, "复合位姿缩放", "scale 与 rotation 复合")
+        super().__init__("R1-9", RuleDifficulty.COMPLEX, "复合位姿缩放", "scale 与 rotation 复合")
 
     def sample_params(self, rng) -> Dict:
         k = float(rng.uniform(1.15, 1.5))
@@ -376,61 +375,9 @@ class R3_5GroupCentroidDistance(Rule):
 
 
 @dataclass
-class R2_7RigidTransform(Rule):
+class R2_6RelativeOrientationInvariant(Rule):
     def __init__(self) -> None:
-        super().__init__("R2-7", RuleDifficulty.COMPLEX, "刚体一致变换", "整体刚体变换, pairwise dist 不变")
-
-    def sample_params(self, rng) -> Dict:
-        theta = float(rng.uniform(math.pi / 18, math.pi / 10))
-        translation = rng.uniform(0.2, 0.4, size=3) * rng.choice([-1, 1], size=3)
-        return {"theta": theta, "translation": translation.tolist()}
-
-    def generate_triplet(self, params, rng):
-        theta = params["theta"]
-        translation = np.array(params["translation"])
-        objs = init_objects(rng, 3, m=3)
-        involved = [0, 1, 2]
-        rot = np.array([[math.cos(theta), -math.sin(theta), 0], [math.sin(theta), math.cos(theta), 0], [0, 0, 1]])
-
-        def rigid(objs_in: Sequence, times: int) -> List:
-            out = []
-            for o in objs_in:
-                new_o = o.copy()
-                p = new_o.p
-                for _ in range(times):
-                    p = rot @ p + translation
-                new_o.p = p
-                out.append(new_o)
-            return out
-
-        a_objs = clone_objects(objs)
-        b_objs = rigid(objs, 1)
-        c_objs = rigid(objs, 2)
-        scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
-
-        def dist_stats(objects: Sequence) -> List[float]:
-            return [dist(objects[0], objects[1]), dist(objects[0], objects[2]), dist(objects[1], objects[2])]
-
-        v = [dist_stats(s.objects) for s in scenes]
-        meta = build_rule_meta(
-            self,
-            "R2",
-            3,
-            involved,
-            ["p"],
-            ["dist-set"],
-            "rigid",
-            {"theta": theta, "translation": translation.tolist()},
-            v,
-            scenes,
-        )
-        return scenes[0], scenes[1], scenes[2], meta
-
-
-@dataclass
-class R2_8RelativeOrientationInvariant(Rule):
-    def __init__(self) -> None:
-        super().__init__("R2-8", RuleDifficulty.COMPLEX, "相对姿态保持", "共同旋转保持夹角不变")
+        super().__init__("R2-6", RuleDifficulty.COMPLEX, "相对姿态保持", "共同旋转保持夹角不变")
 
     def sample_params(self, rng) -> Dict:
         theta = float(rng.uniform(math.pi / 18, math.pi / 10))
@@ -465,55 +412,43 @@ class R2_8RelativeOrientationInvariant(Rule):
 
 
 @dataclass
-class R3_6AreaDistanceCoupled(Rule):
+class R3_6PolygonAreaConstant(Rule):
     def __init__(self) -> None:
-        super().__init__("R3-6", RuleDifficulty.COMPLEX, "面积-边长守恒", "area 与 dist 乘积守恒")
+        super().__init__("R3-6", RuleDifficulty.COMPLEX, "多边形面积恒定", "顶点移动但面积保持恒定")
 
     def sample_params(self, rng) -> Dict:
-        factor = float(rng.uniform(1.2, 1.5))
-        return {"factor": factor}
+        count = int(rng.integers(3, 7))
+        return {"count": count}
 
     def generate_triplet(self, params, rng):
-        factor = params["factor"]
-        objs = init_objects(rng, 3, m=3)
-        involved = [0, 1, 2]
-        # Place base triangle roughly on XY-plane.
-        objs[0].p = np.array([-0.6, 0.0, 0])
-        objs[1].p = np.array([0.6, 0.0, 0])
-        objs[2].p = np.array([0.0, 0.6, 0])
+        count = int(params["count"])
+        objs = init_objects(rng, count, m=count)
+        involved = list(range(count))
+        center = rng.uniform(-0.2, 0.2, size=3)
+        radius = float(rng.uniform(0.55, 0.85))
+        rotation = float(rng.uniform(0.0, 2 * math.pi))
+        points_a = self._regular_polygon(count, radius, center, rotation)
+        target_area = abs(self._signed_area(points_a))
 
-        def stats(objects: Sequence) -> tuple[float, float, float]:
-            area = float(0.5 * np.linalg.norm(np.cross(objects[1].p - objects[0].p, objects[2].p - objects[0].p)))
-            d12 = dist(objects[0], objects[1])
-            return area, d12, area * d12
+        move_count1 = int(rng.integers(1, count + 1))
+        move_count2 = int(rng.integers(1, count + 1))
+        points_b = self._move_points(points_a, rng, target_area, move_count1)
+        points_c = self._move_points(points_b, rng, target_area, move_count2)
 
-        area1, d1, const = stats(objs)
-        area2 = area1 * factor
-        d2 = const / area2
-        area3 = area1 / factor
-        d3 = const / area3
-
-        def adjust(area_target: float, d_target: float) -> List:
-            arranged = clone_objects(objs)
-            arranged[1].p = arranged[0].p + np.array([d_target, 0, 0])
-            scale_y = area_target * 2 / d_target
-            arranged[2].p = np.array([0.0, scale_y, 0.0])
-            return arranged
-
-        a_objs = clone_objects(objs)
-        b_objs = adjust(area2, d2)
-        c_objs = adjust(area3, d3)
+        a_objs = self._apply_points(objs, points_a)
+        b_objs = self._apply_points(objs, points_b)
+        c_objs = self._apply_points(objs, points_c)
         scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
-        v = [list(stats(s.objects))[:2] for s in scenes]
+        v = [self._polygon_area(s.objects) for s in scenes]
         meta = build_rule_meta(
             self,
             "R3",
-            3,
+            count,
             involved,
             ["p"],
-            ["area(0,1,2)", "dist(0,1)"],
-            "coupled",
-            {"constant": const},
+            ["area(poly)"],
+            "constant-area",
+            {"area": target_area, "count": count, "moves": [move_count1, move_count2]},
             v,
             scenes,
         )
@@ -522,45 +457,107 @@ class R3_6AreaDistanceCoupled(Rule):
     def make_distractors(self, scene_c: Scene, rng, meta: Dict) -> Tuple[list[Scene], list[str]]:
         if len(scene_c.objects) < 3:
             return [], []
-        base_objs = scene_c.objects
-        p0 = base_objs[0].p.copy()
-        d_base = dist(base_objs[0], base_objs[1])
-        if d_base <= 1e-6:
-            return [], []
-        area_base = float(0.5 * np.linalg.norm(np.cross(base_objs[1].p - base_objs[0].p, base_objs[2].p - base_objs[0].p)))
+        base_pts = [o.p.copy() for o in scene_c.objects]
+        center = np.mean(np.stack(base_pts, axis=0), axis=0)
 
-        def adjust(area_target: float, d_target: float) -> Scene:
-            arranged = clone_objects(base_objs)
-            safe_d = max(float(d_target), 0.05)
-            arranged[0].p = p0
-            arranged[1].p = p0 + np.array([safe_d, 0.0, 0.0])
-            scale_y = max(area_target * 2 / safe_d, 0.04)
-            arranged[2].p = np.array([0.0, scale_y, 0.0])
+        def scale_y(scale: float) -> Scene:
+            arranged = clone_objects(scene_c.objects)
+            for i, obj in enumerate(arranged):
+                vec = obj.p - center
+                vec[1] *= scale
+                obj.p = center + vec
             return scene_from_objects(arranged)
 
-        combos = [
-            (area_base * 1.8, d_base),
-            (area_base, d_base * 1.6),
-            (area_base * 0.6, d_base * 0.6),
+        distractors = [
+            scale_y(1.35),
+            scale_y(0.7),
+            scale_y(1.6),
         ]
-        distractors = [adjust(a, d) for a, d in combos]
         reasons = [
-            "面积显著偏大，乘积偏离常数",
-            "边长显著偏大，乘积偏离常数",
-            "面积与边长同时偏小，乘积偏离常数",
+            "面积放大，未保持恒定",
+            "面积缩小，未保持恒定",
+            "面积变化过大，未保持恒定",
         ]
         return distractors, reasons
+
+    @staticmethod
+    def _regular_polygon(count: int, radius: float, center: np.ndarray, rotation: float) -> List[np.ndarray]:
+        angles = [rotation + i * 2 * math.pi / count for i in range(count)]
+        return [center + np.array([radius * math.cos(a), radius * math.sin(a), 0.0]) for a in angles]
+
+    @staticmethod
+    def _signed_area(points: Sequence[np.ndarray]) -> float:
+        area = 0.0
+        n = len(points)
+        for i in range(n):
+            x1, y1 = points[i][0], points[i][1]
+            x2, y2 = points[(i + 1) % n][0], points[(i + 1) % n][1]
+            area += x1 * y2 - x2 * y1
+        return 0.5 * area
+
+    def _polygon_area(self, objs: Sequence[ObjectState]) -> float:
+        points = [o.p for o in objs]
+        return float(abs(self._signed_area(points)))
+
+    @staticmethod
+    def _apply_points(objs_in: Sequence[ObjectState], points: Sequence[np.ndarray]) -> List[ObjectState]:
+        out = clone_objects(objs_in)
+        for obj, p in zip(out, points):
+            obj.p = p.copy()
+        return out
+
+    def _move_points(
+        self,
+        points_in: Sequence[np.ndarray],
+        rng,
+        target_area: float,
+        move_count: int,
+    ) -> List[np.ndarray]:
+        points = [p.copy() for p in points_in]
+        n = len(points)
+        move_count = min(max(move_count, 1), n)
+        move_idxs = rng.choice(n, size=move_count, replace=False).tolist()
+        for idx in move_idxs:
+            delta = rng.uniform(-0.25, 0.25, size=2)
+            points[idx][0] += float(delta[0])
+            points[idx][1] += float(delta[1])
+
+        base_signed = self._signed_area(points_in)
+        target_signed = math.copysign(target_area, base_signed if abs(base_signed) > 1e-6 else 1.0)
+        current_signed = self._signed_area(points)
+        diff = target_signed - current_signed
+
+        adjusted = False
+        for idx in move_idxs:
+            prev_idx = (idx - 1) % n
+            next_idx = (idx + 1) % n
+            coeff_y = 0.5 * (points[prev_idx][0] - points[next_idx][0])
+            if abs(coeff_y) > 1e-6:
+                points[idx][1] += diff / coeff_y
+                adjusted = True
+                break
+            coeff_x = 0.5 * (points[next_idx][1] - points[prev_idx][1])
+            if abs(coeff_x) > 1e-6:
+                points[idx][0] += diff / coeff_x
+                adjusted = True
+                break
+
+        if not adjusted:
+            idx = move_idxs[0]
+            points[idx][1] += diff
+        return points
 
 
 @dataclass
 class R3_7PositionCycle(Rule):
     def __init__(self) -> None:
-        super().__init__("R3-7", RuleDifficulty.COMPLEX, "多对象位置轮换", "不同形状沿结构相邻位置轮换")
+        super().__init__("R3-7", RuleDifficulty.COMPLEX, "多对象位置轮换", "不同形状沿结构按步长轮换")
 
     def sample_params(self, rng) -> Dict:
         count = int(rng.integers(2, 6))
         direction = "cw" if rng.random() < 0.5 else "ccw"
-        return {"count": count, "direction": direction}
+        step = int(rng.integers(1, count))
+        return {"count": count, "direction": direction, "step": step}
 
     @staticmethod
     def _regular_polygon(count: int, radius: float) -> List[np.ndarray]:
@@ -580,14 +577,17 @@ class R3_7PositionCycle(Rule):
                 np.array([-0.7, 0.45, 0.0]),
             ], "rectangle"
         if count == 5:
-            base = self._regular_polygon(5, 0.7)
-            star_order = [0, 2, 4, 1, 3]
-            return [base[i] for i in star_order], "pentagram"
+            return self._regular_polygon(5, 0.7), "pentagon"
         raise ValueError(f"Unsupported object count {count}")
 
     def generate_triplet(self, params, rng):
         count = int(params["count"])
         direction = params["direction"]
+        step = int(params.get("step", 1))
+        if step <= 0:
+            step = 1
+        if step >= count:
+            step = count - 1
         positions, layout_name = self._layout_positions(count)
         rot_angles = rng.uniform(-math.pi / 6, math.pi / 6, size=3)
         scale = float(rng.uniform(0.9, 1.1))
@@ -596,7 +596,7 @@ class R3_7PositionCycle(Rule):
         shapes = rng.choice(SHAPES, size=count, replace=False).tolist()
         objs = [random_object(rng, shape=shape) for shape in shapes]
         involved = list(range(count))
-        step = 1 if direction == "cw" else -1
+        step = step if direction == "cw" else -step
 
         def build_frame(offset: int) -> List:
             arranged = clone_objects(objs)
@@ -623,6 +623,7 @@ class R3_7PositionCycle(Rule):
             {
                 "direction": direction,
                 "count": count,
+                "step": abs(step),
                 "layout": layout_name,
                 "rotation_euler": rot_angles.tolist(),
                 "scale": scale,
@@ -660,9 +661,7 @@ class R3_8DensityShift(Rule):
                 np.array([-0.7, 0.45, 0.0]),
             ], "rectangle"
         if count == 5:
-            base = self._regular_polygon(5, 0.7)
-            star_order = [0, 2, 4, 1, 3]
-            return [base[i] for i in star_order], "pentagram"
+            return self._regular_polygon(5, 0.7), "pentagon"
         raise ValueError(f"Unsupported object count {count}")
 
     @staticmethod
@@ -791,9 +790,7 @@ class R3_9ScaleShift(Rule):
                 np.array([-0.7, 0.45, 0.0]),
             ], "rectangle"
         if count == 5:
-            base = self._regular_polygon(5, 0.7)
-            star_order = [0, 2, 4, 1, 3]
-            return [base[i] for i in star_order], "pentagram"
+            return self._regular_polygon(5, 0.7), "pentagon"
         raise ValueError(f"Unsupported object count {count}")
 
     @staticmethod
@@ -1087,13 +1084,6 @@ def _advance_r1_1(scene_c: Scene, _params: Dict, base_meta: Dict, _state: Dict) 
 
 
 def _advance_r1_2(scene_c: Scene, params: Dict, _base_meta: Dict, _state: Dict) -> Scene:
-    order = params.get("order", [1, 2, 0])
-    objs = clone_objects(scene_c.objects)
-    objs[0].r = objs[0].r[np.array(order, dtype=int)]
-    return scene_from_objects(objs)
-
-
-def _advance_r1_3(scene_c: Scene, params: Dict, _base_meta: Dict, _state: Dict) -> Scene:
     axis_idx = int(params.get("axis", 0))
     theta = float(params.get("theta", 0.0))
     delta = np.zeros(3)
@@ -1103,14 +1093,14 @@ def _advance_r1_3(scene_c: Scene, params: Dict, _base_meta: Dict, _state: Dict) 
     return scene_from_objects(objs)
 
 
-def _advance_r1_5(scene_c: Scene, params: Dict, _base_meta: Dict, _state: Dict) -> Scene:
+def _advance_r1_4(scene_c: Scene, params: Dict, _base_meta: Dict, _state: Dict) -> Scene:
     delta = np.array(params.get("delta", [0.0, 0.0, 0.0]), dtype=float)
     objs = clone_objects(scene_c.objects)
     objs[0] = apply_translation(objs[0], delta)
     return scene_from_objects(objs)
 
 
-def _advance_r1_6(scene_c: Scene, _params: Dict, base_meta: Dict, _state: Dict) -> Scene:
+def _advance_r1_5(scene_c: Scene, _params: Dict, base_meta: Dict, _state: Dict) -> Scene:
     delta = float(base_meta.get("pattern_params", {}).get("delta", 0.0))
     objs = clone_objects(scene_c.objects)
     objs[0].density = max(objs[0].density + delta, 1e-3)
@@ -1256,10 +1246,9 @@ def _value_dist_set(scene: Scene, _params: Dict, _base_meta: Dict, _state: Dict)
 def _build_r4_candidates() -> List[_R4Candidate]:
     return [
         _R4Candidate(R1_1ScaleArithmetic(), _advance_r1_1, _value_size),
-        _R4Candidate(R1_2AxisPermutation(), _advance_r1_2, _value_r),
-        _R4Candidate(R1_3FixedAxisRotation(), _advance_r1_3, _value_rotation_axis),
-        _R4Candidate(R1_5TranslationArithmetic(), _advance_r1_5, _value_position),
-        _R4Candidate(R1_6DensityArithmetic(), _advance_r1_6, _value_density),
+        _R4Candidate(R1_2FixedAxisRotation(), _advance_r1_2, _value_rotation_axis),
+        _R4Candidate(R1_4TranslationArithmetic(), _advance_r1_4, _value_position),
+        _R4Candidate(R1_5DensityArithmetic(), _advance_r1_5, _value_density),
     ]
 
 
@@ -2634,12 +2623,11 @@ class R4_10DominoChain(Rule):
 
 def build_complex_rules() -> List[Rule]:
     return [
-        R1_10ScaleRotateCoupled(),
+        R1_9ScaleRotateCoupled(),
         R3_4SymmetryRigid(),
         R3_5GroupCentroidDistance(),
-        R2_7RigidTransform(),
-        R2_8RelativeOrientationInvariant(),
-        R3_6AreaDistanceCoupled(),
+        R2_6RelativeOrientationInvariant(),
+        R3_6PolygonAreaConstant(),
         R3_7PositionCycle(),
         R3_8DensityShift(),
         R3_9ScaleShift(),

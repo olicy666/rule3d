@@ -7,6 +7,7 @@ from typing import Dict, List, Sequence, Tuple
 import numpy as np
 
 from .base import Rule, RuleDifficulty
+from .complex import _separate_objects_no_contact
 from .utils import (
     SHAPES,
     ang,
@@ -329,9 +330,9 @@ class M05TouchSequence(Rule):
 
 
 @dataclass
-class R2_9AcceleratedRotation(Rule):
+class R2_7AcceleratedRotation(Rule):
     def __init__(self) -> None:
-        super().__init__("R2-9", RuleDifficulty.MEDIUM, "加速旋转", "旋转幅度递增")
+        super().__init__("R2-7", RuleDifficulty.MEDIUM, "加速旋转", "旋转幅度递增")
 
     def sample_params(self, rng) -> Dict:
         obj_count = int(rng.integers(3, 7))
@@ -411,87 +412,9 @@ class R2_9AcceleratedRotation(Rule):
 
 
 @dataclass
-class R2_10GeometricFusion(Rule):
+class R2_8OrbitalRotation(Rule):
     def __init__(self) -> None:
-        super().__init__("R2-10", RuleDifficulty.MEDIUM, "几何融合", "等差步伐向中心融合")
-
-    def sample_params(self, rng) -> Dict:
-        delta = float(rng.uniform(0.28, 0.38))
-        return {"delta": delta}
-
-    def generate_triplet(self, params, rng):
-        delta = float(params["delta"])
-        objs = init_objects(rng, k=3, m=3)
-        involved = [0, 1, 2]
-
-        for obj in objs:
-            direction_vec = _unit_vector(rng)
-            radius = float(rng.uniform(0.75, 1.1))
-            obj.p = direction_vec * radius
-
-        center = centroid(objs)
-        scales = [1.0, 1.0 - delta, 1.0 - 2 * delta]
-
-        def place(scale: float) -> List:
-            arranged = clone_objects(objs)
-            for o in arranged:
-                o.p = center + (o.p - center) * scale
-            return arranged
-
-        a_objs = place(scales[0])
-        b_objs = place(scales[1])
-        c_objs = place(scales[2])
-        scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
-        v = [[float(np.linalg.norm(o.p - center)) for o in s.objects] for s in scenes]
-        meta = build_rule_meta(
-            self,
-            "R2",
-            3,
-            involved,
-            ["p"],
-            ["cent(S)"],
-            "fusion-arithmetic",
-            {"delta": delta, "center": center.tolist(), "scales": scales},
-            v,
-            scenes,
-        )
-        return scenes[0], scenes[1], scenes[2], meta
-
-    def make_distractors(self, scene_c: Scene, rng, meta: Dict) -> Tuple[List[Scene], List[str]]:
-        if len(scene_c.objects) < 3:
-            return [], []
-        params = meta.get("pattern_params", {})
-        scales = params.get("scales")
-        center = np.array(params.get("center", [0.0, 0.0, 0.0]), dtype=float)
-        if not scales or len(scales) != 3:
-            return [], []
-        s2, s3 = float(scales[1]), float(scales[2])
-        if abs(s3) < 1e-6:
-            return [], []
-
-        def rescale(objs_in: List, target_scale: float) -> List:
-            arranged = clone_objects(objs_in)
-            for o in arranged:
-                vec = o.p - center
-                o.p = center + vec * (target_scale / s3)
-            return arranged
-
-        same = rescale(scene_c.objects, s2)
-        small = rescale(scene_c.objects, (s2 + s3) / 2)
-        overshoot = rescale(scene_c.objects, max(s3 - (s2 - s3), 0.08))
-        distractors = [scene_from_objects(x) for x in [same, small, overshoot]]
-        reasons = [
-            "融合未延续，停留在上一帧",
-            "融合步幅过小，未达到等差推进",
-            "融合过度，步幅偏大",
-        ]
-        return distractors, reasons
-
-
-@dataclass
-class R2_11OrbitalRotation(Rule):
-    def __init__(self) -> None:
-        super().__init__("R2-11", RuleDifficulty.MEDIUM, "行星公转", "多物体绕中心球体等速公转")
+        super().__init__("R2-8", RuleDifficulty.MEDIUM, "行星公转", "多物体绕中心球体等速公转")
 
     def sample_params(self, rng) -> Dict:
         count = int(rng.integers(2, 5))
@@ -614,9 +537,9 @@ class R2_11OrbitalRotation(Rule):
 
 
 @dataclass
-class R2_12PoseShift(Rule):
+class R2_9PoseShift(Rule):
     def __init__(self) -> None:
-        super().__init__("R2-12", RuleDifficulty.MEDIUM, "易位姿态转换", "按形状匹配的姿态变化持续")
+        super().__init__("R2-9", RuleDifficulty.MEDIUM, "易位姿态转换", "按形状匹配的姿态变化持续")
 
     def sample_params(self, rng) -> Dict:
         count = int(rng.integers(2, 6))
@@ -711,9 +634,9 @@ class R2_12PoseShift(Rule):
 
 
 @dataclass
-class R2_13PositionScaleShift(Rule):
+class R2_10PositionScaleShift(Rule):
     def __init__(self) -> None:
-        super().__init__("R2-13", RuleDifficulty.MEDIUM, "易位尺寸转换", "按形状匹配的尺寸变化持续")
+        super().__init__("R2-10", RuleDifficulty.MEDIUM, "易位尺寸转换", "按形状匹配的尺寸变化持续")
 
     def sample_params(self, rng) -> Dict:
         count = int(rng.integers(2, 6))
@@ -799,9 +722,9 @@ class R2_13PositionScaleShift(Rule):
 
 
 @dataclass
-class R2_14PositionDensityShift(Rule):
+class R2_11PositionDensityShift(Rule):
     def __init__(self) -> None:
-        super().__init__("R2-14", RuleDifficulty.MEDIUM, "易位密度转换", "按形状匹配的密度变化持续")
+        super().__init__("R2-11", RuleDifficulty.MEDIUM, "易位密度转换", "按形状匹配的密度变化持续")
 
     def sample_params(self, rng) -> Dict:
         count = int(rng.integers(2, 6))
@@ -1020,73 +943,123 @@ class R2_5AngleArithmetic(Rule):
 
     def generate_triplet(self, params, rng):
         base_angle, delta = params["base_angle"], params["delta"]
+        # 生成 3-6 个几何体
         count = int(rng.integers(3, 7))
-        objs = init_objects(rng, 2, m=count)
-        involved = [0, 1]
+        objs = [random_object(rng) for _ in range(count)]
+        involved = list(range(count))
+        
+        # 选择旋转的几何体数量（3-6 个，根据总数量决定）
+        rotate_count = min(count, int(rng.integers(3, min(7, count + 1))))
+        rotate_indices = list(range(rotate_count))
+        
+        # 选择一个随机的旋转轴（在整个空间中）
         axis_dir = _unit_vector(rng)
-        base_rot = axis_dir * base_angle
-        delta_rot = axis_dir * delta
+        
+        # 计算旋转中心（所有物体的质心）
+        center = centroid(objs)
+        
+        # 初始放置物体，确保它们分散在空间中
+        _separate_objects_no_contact(objs, rng, gap=0.2)
+        
+        # 围绕中心点在整个空间中旋转
+        def rotate_around_center(src, angle: float):
+            """围绕中心点旋转物体"""
+            out = clone_objects(src)
+            # 构建旋转矩阵（围绕 axis_dir 轴旋转 angle 角度）
+            # 使用 Rodrigues 旋转公式
+            cos_a = math.cos(angle)
+            sin_a = math.sin(angle)
+            u = axis_dir / (np.linalg.norm(axis_dir) + 1e-9)
+            
+            # Rodrigues 旋转矩阵
+            rot_matrix = (
+                cos_a * np.eye(3) +
+                sin_a * np.array([
+                    [0, -u[2], u[1]],
+                    [u[2], 0, -u[0]],
+                    [-u[1], u[0], 0]
+                ]) +
+                (1 - cos_a) * np.outer(u, u)
+            )
+            
+            # 只旋转指定索引的物体
+            for idx in rotate_indices:
+                # 将物体位置相对于中心旋转
+                offset = out[idx].p - center
+                rotated_offset = rot_matrix @ offset
+                out[idx].p = center + rotated_offset
+                
+                # 同时旋转物体的姿态
+                delta_rot = axis_dir * angle
+                out[idx] = apply_rotation(out[idx], delta_rot)
+            
+            return out
+        
+        # 计算三帧的旋转角度（等差）
+        angles = [base_angle, base_angle + delta, base_angle + 2 * delta]
+        
         a_objs = clone_objects(objs)
-        a_objs[1] = apply_rotation(a_objs[1], base_rot)
-        b_objs = clone_objects(a_objs)
-        b_objs[1] = apply_rotation(b_objs[1], delta_rot)
-        c_objs = clone_objects(b_objs)
-        c_objs[1] = apply_rotation(c_objs[1], delta_rot)
+        b_objs = rotate_around_center(a_objs, delta)  # 从 base_angle 旋转到 base_angle + delta
+        c_objs = rotate_around_center(b_objs, delta)  # 再旋转 delta
+        
         scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
-        v = [ang(*pair) for pair in [[a_objs[0], a_objs[1]], [b_objs[0], b_objs[1]], [c_objs[0], c_objs[1]]]]
+        
+        # 计算前两个旋转物体之间的夹角（用于 meta）
+        v = [ang(a_objs[0], a_objs[1]), ang(b_objs[0], b_objs[1]), ang(c_objs[0], c_objs[1])]
+        
         meta = build_rule_meta(
-            self, "R2", 2, involved, ["R"], ["ang(0,1)"], "arithmetic", {"delta": delta}, v, scenes
+            self,
+            "R2",
+            rotate_count,
+            rotate_indices,
+            ["R", "p"],
+            ["ang(0,1)"],
+            "arithmetic",
+            {"delta": delta, "rotate_count": rotate_count},
+            v,
+            scenes,
         )
         return scenes[0], scenes[1], scenes[2], meta
 
 
 @dataclass
-class R3_1AreaArithmetic(Rule):
+class R3_1VolumeSumConserved(Rule):
     def __init__(self) -> None:
-        super().__init__("R3-1", RuleDifficulty.MEDIUM, "三对象面积等差", "三点面积等差变化")
+        super().__init__("R3-1", RuleDifficulty.MEDIUM, "三体积想等", "三体积之和恒定，单体等差变化")
 
     def sample_params(self, rng) -> Dict:
-        mode = rng.choice(["up", "down", "flat"])
-        if mode == "flat":
-            return {"delta_ratio": 0.0, "mode": mode}
-        if mode == "up":
-            delta_ratio = float(rng.uniform(0.35, 0.6))
-        else:
-            delta_ratio = -float(rng.uniform(0.35, 0.45))
-        return {"delta_ratio": delta_ratio, "mode": mode}
+        if rng.random() < 0.2:
+            return {"mode": "flat"}
+        mode = rng.choice(["one-down-two-up", "two-down-one-up"])
+        return {"mode": mode}
 
     def generate_triplet(self, params, rng):
         objs = init_objects(rng, 3, m=3)
         involved = [0, 1, 2]
-        # Fix base edge on x 轴，控制高度即可精准调节面积
-        base_len = 1.0
-        objs[0].p = np.array([-base_len / 2, 0, 0])
-        objs[1].p = np.array([base_len / 2, 0, 0])
-        height1 = float(rng.uniform(0.4, 0.8))
-        objs[2].p = np.array([0.0, height1, 0.0])
-        area1 = 0.5 * base_len * height1
-        delta_ratio = float(params["delta_ratio"])
-        delta = area1 * delta_ratio
-        area2 = area1 + delta
-        area3 = area1 + 2 * delta
-        height2 = 2 * area2 / base_len
-        height3 = 2 * area3 / base_len
+        base_vols = np.array([size(o) for o in objs], dtype=float)
+        deltas = self._sample_deltas(base_vols, params, rng)
+        mode = params.get("mode", "flat")
+        if np.all(np.abs(deltas) < 1e-6):
+            mode = "flat"
 
-        b_objs = clone_objects(objs)
-        b_objs[2].p = np.array([0.0, height2, 0.0])
-        c_objs = clone_objects(objs)
-        c_objs[2].p = np.array([0.0, height3, 0.0])
-        scenes = [scene_from_objects(x) for x in [objs, b_objs, c_objs]]
-        v = [self._area(s.objects) for s in scenes]
+        vols_a = base_vols
+        vols_b = base_vols + deltas
+        vols_c = base_vols + 2.0 * deltas
+
+        a_objs = clone_objects(objs)
+        b_objs = self._apply_target_volumes(a_objs, vols_b)
+        c_objs = self._apply_target_volumes(a_objs, vols_c)
+        scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
+        v = [vols_a.tolist(), vols_b.tolist(), vols_c.tolist()]
         meta = build_rule_meta(
             self,
             "R3",
             3,
             involved,
-            ["p"],
-            ["area(0,1,2)"],
-            "arithmetic",
-            {"delta": delta, "mode": params.get("mode", "up" if delta_ratio > 0 else ("down" if delta_ratio < 0 else "flat"))},
+            ["r"],
+            ["size(Oi)", "sum(size)"],
+            "sum-constant",
+            {"deltas": deltas.tolist(), "mode": mode},
             v,
             scenes,
         )
@@ -1098,93 +1071,123 @@ class R3_1AreaArithmetic(Rule):
         v = meta.get("v", {})
         v1 = v.get("v1")
         v2 = v.get("v2")
-        if not (v1 and v2):
+        v3 = v.get("v3")
+        if not (v1 and v2 and v3):
             return [], []
-        area1 = float(v1[0])
-        area2 = float(v2[0])
-        delta = area2 - area1
-        base_len = float(np.linalg.norm(scene_c.objects[1].p - scene_c.objects[0].p))
-        if base_len <= 1e-6:
-            return [], []
+        vols1 = np.array(v1, dtype=float)
+        vols2 = np.array(v2, dtype=float)
+        vols3 = np.array(v3, dtype=float)
+        deltas = vols2 - vols1
 
-        def build_scene(area_target: float) -> Scene:
+        def build_scene(target_vols: np.ndarray) -> Scene:
             objs = clone_objects(scene_c.objects)
-            height = max(area_target * 2 / base_len, 0.04)
-            new_p = objs[2].p.copy()
-            sign = 1.0 if new_p[1] >= 0 else -1.0
-            new_p[1] = height * sign
-            objs[2].p = new_p
+            for i, target in enumerate(target_vols):
+                cur = size(objs[i])
+                if cur <= 1e-6:
+                    continue
+                factor = (max(float(target), 1e-6) / cur) ** (1 / 3)
+                objs[i] = apply_scale(objs[i], factor)
             return scene_from_objects(objs)
 
-        min_area = max(area1 * 0.12, 0.02)
-
-        if abs(delta) < 1e-6:
-            wrong_areas = [area1 * 1.6, area1 * 0.5, area1 * 2.1]
-            reasons = ["面积被放大", "面积被缩小", "面积放大过多"]
-        else:
-            step = abs(delta)
-            wrong_areas = [
-                area1,
-                area1 + (2 * step if delta < 0 else -2 * step),
-                area1 + (3 * step if delta > 0 else -3 * step),
+        if np.all(np.abs(deltas) < 1e-6):
+            avg = float(np.mean(vols3))
+            bump = max(avg * 0.35, 0.02)
+            bump = min(bump, vols3[1] * 0.5)
+            target_up = vols3.copy()
+            target_up[0] += bump
+            target_down = vols3.copy()
+            target_down[1] = max(target_down[1] - bump, 1e-6)
+            target_mix = vols3.copy()
+            target_mix[2] += bump * 0.5
+            target_mix[0] = max(target_mix[0] - bump * 0.5, 1e-6)
+            distractors = [
+                build_scene(target_up),
+                build_scene(target_down),
+                build_scene(target_mix),
             ]
-            reasons = ["面积未变化", "面积变化方向相反", "面积步长过大"]
+            reasons = ["体积发生变化", "体积减小", "体积变化不一致"]
+            return distractors, reasons
 
-        wrong_areas = [max(min_area, float(a)) for a in wrong_areas]
-        distractors = [build_scene(a) for a in wrong_areas]
+        target_same = vols2
+        target_reverse = vols2 - deltas
+        total = float(np.sum(vols3))
+        bump = max(total * 0.08, 0.02)
+        target_sum = vols3.copy()
+        target_sum[0] += bump
+
+        distractors = [
+            build_scene(target_same),
+            build_scene(target_reverse),
+            build_scene(target_sum),
+        ]
+        reasons = ["变化停留在上一帧", "变化方向反向", "总体积不守恒"]
         return distractors, reasons
 
     @staticmethod
-    def _area(objs: Sequence) -> float:
-        return float(0.5 * np.linalg.norm(np.cross(objs[1].p - objs[0].p, objs[2].p - objs[0].p)))
+    def _apply_target_volumes(objs_in: Sequence[ObjectState], targets: np.ndarray) -> List[ObjectState]:
+        out = clone_objects(objs_in)
+        for i, target in enumerate(targets):
+            cur = size(out[i])
+            if cur <= 1e-6:
+                continue
+            factor = (max(float(target), 1e-6) / cur) ** (1 / 3)
+            out[i] = apply_scale(out[i], factor)
+        return out
 
+    @staticmethod
+    def _pick_total_change(rng, max_total: float, min_total: float) -> float:
+        if max_total <= 0:
+            return 0.0
+        if max_total < min_total:
+            min_total = max_total * 0.5
+        if min_total <= 0:
+            min_total = max_total * 0.2
+        return float(rng.uniform(min_total, max_total))
 
-@dataclass
-class R2_6DistanceDifferenceConserved(Rule):
-    def __init__(self) -> None:
-        super().__init__("R2-6", RuleDifficulty.MEDIUM, "距离差分守恒", "两对距离差保持常数")
+    def _sample_deltas(self, base_vols: np.ndarray, params: Dict, rng) -> np.ndarray:
+        mode = params.get("mode", "flat")
+        if mode == "flat":
+            return np.zeros(3, dtype=float)
 
-    def sample_params(self, rng) -> Dict:
-        constant = float(rng.uniform(0.2, 0.5))
-        step = float(rng.uniform(0.1, 0.25))
-        return {"constant": constant, "step": step}
+        max_down_ratio = 0.25
+        max_up_ratio = 0.45
+        min_step_ratio = 0.08
 
-    def generate_triplet(self, params, rng):
-        c_val, step = params["constant"], params["step"]
-        objs = init_objects(rng, 3, m=3)
-        involved = [0, 1, 2]
-        direction_vec = _unit_vector(rng)
-        base_dist = float(rng.uniform(0.7, 1.0))
-        d1 = base_dist
-        d2 = max(0.3, base_dist - c_val)
+        indices = [0, 1, 2]
+        if mode == "one-down-two-up":
+            down_idx = int(rng.integers(0, 3))
+            up_idxs = [i for i in indices if i != down_idx]
+            weight = float(rng.uniform(0.3, 0.7))
+            max_down = base_vols[down_idx] * max_down_ratio
+            max_up1 = base_vols[up_idxs[0]] * max_up_ratio
+            max_up2 = base_vols[up_idxs[1]] * max_up_ratio
+            max_total = min(max_down, max_up1 / weight, max_up2 / (1.0 - weight))
+            min_total = base_vols[down_idx] * min_step_ratio
+            total = self._pick_total_change(rng, max_total, min_total)
+            if total <= 1e-6:
+                return np.zeros(3, dtype=float)
+            deltas = np.zeros(3, dtype=float)
+            deltas[down_idx] = -total
+            deltas[up_idxs[0]] = total * weight
+            deltas[up_idxs[1]] = total * (1.0 - weight)
+            return deltas
 
-        def place(d01: float, d12: float):
-            o0, o1, o2 = clone_objects(objs)
-            o1.p = np.zeros(3)
-            o0.p = -direction_vec * d01
-            o2.p = direction_vec * d12
-            return [o0, o1, o2]
-
-        scenes_objs = [
-            place(d1, d2),
-            place(d1 + step, d2 + step),
-            place(d1 + 2 * step, d2 + 2 * step),
-        ]
-        scenes = [scene_from_objects(x) for x in scenes_objs]
-        v = [dist(pair[0], pair[1]) - dist(pair[1], pair[2]) for pair in scenes_objs]
-        meta = build_rule_meta(
-            self,
-            "R2",
-            3,
-            involved,
-            ["p"],
-            ["dist(0,1)-dist(1,2)"],
-            "conservation",
-            {"constant": c_val},
-            v,
-            scenes,
-        )
-        return scenes[0], scenes[1], scenes[2], meta
+        up_idx = int(rng.integers(0, 3))
+        down_idxs = [i for i in indices if i != up_idx]
+        weight = float(rng.uniform(0.3, 0.7))
+        max_up = base_vols[up_idx] * max_up_ratio
+        max_down1 = base_vols[down_idxs[0]] * max_down_ratio
+        max_down2 = base_vols[down_idxs[1]] * max_down_ratio
+        max_total = min(max_up, max_down1 / weight, max_down2 / (1.0 - weight))
+        min_total = min(base_vols[down_idxs[0]], base_vols[down_idxs[1]]) * min_step_ratio
+        total = self._pick_total_change(rng, max_total, min_total)
+        if total <= 1e-6:
+            return np.zeros(3, dtype=float)
+        deltas = np.zeros(3, dtype=float)
+        deltas[up_idx] = total
+        deltas[down_idxs[0]] = -total * weight
+        deltas[down_idxs[1]] = -total * (1.0 - weight)
+        return deltas
 
 
 @dataclass
@@ -1392,9 +1395,9 @@ class M13SymmetrySwitch(Rule):
 
 
 @dataclass
-class R1_9DualSizeConservation(Rule):
+class R1_8DualSizeConservation(Rule):
     def __init__(self) -> None:
-        super().__init__("R1-9", RuleDifficulty.MEDIUM, "双对象属性联动", "size 和保持守恒")
+        super().__init__("R1-8", RuleDifficulty.MEDIUM, "双对象属性联动", "size 和保持守恒")
 
     def sample_params(self, rng) -> Dict:
         delta_ratio = float(rng.uniform(0.4, 0.8))
@@ -1506,9 +1509,9 @@ class R1_9DualSizeConservation(Rule):
 
 
 @dataclass
-class R1_11AttributeSwap(Rule):
+class R1_10AttributeSwap(Rule):
     def __init__(self) -> None:
-        super().__init__("R1-11", RuleDifficulty.MEDIUM, "尺度/姿态交替互换", "尺寸与姿态交替互换（形状固定）")
+        super().__init__("R1-10", RuleDifficulty.MEDIUM, "尺度/姿态交替互换", "尺寸与姿态交替互换（形状固定）")
 
     def sample_params(self, rng) -> Dict:
         first_attr = "r" if rng.random() < 0.5 else "R"
@@ -1623,9 +1626,9 @@ class R1_11AttributeSwap(Rule):
 
 
 @dataclass
-class R1_12OrientationFollowMotion(Rule):
+class R1_11OrientationFollowMotion(Rule):
     def __init__(self) -> None:
-        super().__init__("R1-12", RuleDifficulty.MEDIUM, "主轴对齐位移", "移动方向与主轴一致")
+        super().__init__("R1-11", RuleDifficulty.MEDIUM, "主轴对齐位移", "移动方向与主轴一致")
 
     def sample_params(self, rng) -> Dict:
         step = float(rng.uniform(0.25, 0.4))
@@ -1682,9 +1685,9 @@ class R1_12OrientationFollowMotion(Rule):
 
 
 @dataclass
-class R1_13DensitySizeCoupled(Rule):
+class R1_12DensitySizeCoupled(Rule):
     def __init__(self) -> None:
-        super().__init__("R1-13", RuleDifficulty.MEDIUM, "密度驱动缩放", "密度越大缩放越大，密度越小缩放越小")
+        super().__init__("R1-12", RuleDifficulty.MEDIUM, "密度驱动缩放", "密度越大缩放越大，密度越小缩放越小")
 
     def sample_params(self, rng) -> Dict:
         scale_up = float(rng.uniform(3.0, 4.2))
@@ -1774,9 +1777,9 @@ class R1_13DensitySizeCoupled(Rule):
 
 
 @dataclass
-class R1_14MirrorDensityComplement(Rule):
+class R1_13MirrorDensityComplement(Rule):
     def __init__(self) -> None:
-        super().__init__("R1-14", RuleDifficulty.MEDIUM, "镜像密度缩放", "镜像位置下密度一增一减")
+        super().__init__("R1-13", RuleDifficulty.MEDIUM, "镜像密度缩放", "镜像位置下密度一增一减")
 
     def sample_params(self, rng) -> Dict:
         scale_up = float(rng.uniform(1.8, 2.6))
@@ -1867,21 +1870,19 @@ def build_medium_rules() -> List[Rule]:
     return [
         R2_1DistanceGeometric(),
         R2_3DirectionRotate(),
-        R2_9AcceleratedRotation(),
-        R2_10GeometricFusion(),
-        R2_11OrbitalRotation(),
-        R2_12PoseShift(),
-        R2_13PositionScaleShift(),
-        R2_14PositionDensityShift(),
+        R2_7AcceleratedRotation(),
+        R2_8OrbitalRotation(),
+        R2_9PoseShift(),
+        R2_10PositionScaleShift(),
+        R2_11PositionDensityShift(),
         R2_4ContainRatioArithmetic(),
         R2_5AngleArithmetic(),
-        R3_1AreaArithmetic(),
-        R2_6DistanceDifferenceConserved(),
+        R3_1VolumeSumConserved(),
         R3_2OrderingCycle(),
         R3_3DistanceVectorGeometric(),
-        R1_9DualSizeConservation(),
-        R1_11AttributeSwap(),
-        R1_12OrientationFollowMotion(),
-        R1_13DensitySizeCoupled(),
-        R1_14MirrorDensityComplement(),
+        R1_8DualSizeConservation(),
+        R1_10AttributeSwap(),
+        R1_11OrientationFollowMotion(),
+        R1_12DensitySizeCoupled(),
+        R1_13MirrorDensityComplement(),
     ]

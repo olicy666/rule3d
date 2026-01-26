@@ -162,9 +162,9 @@ class S03SingleAxisGeometric(Rule):
 
 
 @dataclass
-class R1_2AxisPermutation(Rule):
+class R2_12AxisPermutation(Rule):
     def __init__(self) -> None:
-        super().__init__("R1-2", RuleDifficulty.SIMPLE, "尺度轴置换循环", "r_x/r_y/r_z 按固定置换循环")
+        super().__init__("R2-12", RuleDifficulty.SIMPLE, "尺度轴置换循环", "r_x/r_y/r_z 按固定置换循环")
 
     def sample_params(self, rng) -> Dict:
         order = rng.choice([[1, 2, 0], [2, 0, 1]])
@@ -194,7 +194,7 @@ class R1_2AxisPermutation(Rule):
         v = [o.r.tolist() for o in [a_objs[0], b_objs[0], c_objs[0]]]
         meta = build_rule_meta(
             self,
-            "R1",
+            "R2",
             1,
             involved,
             ["r"],
@@ -323,9 +323,9 @@ class R2_2AnisotropicGeometric(Rule):
 
 
 @dataclass
-class R1_3FixedAxisRotation(Rule):
+class R1_2FixedAxisRotation(Rule):
     def __init__(self) -> None:
-        super().__init__("R1-3", RuleDifficulty.SIMPLE, "固定轴旋转", "绕固定轴等差旋转")
+        super().__init__("R1-2", RuleDifficulty.SIMPLE, "固定轴旋转", "绕固定轴等差旋转")
 
     def sample_params(self, rng) -> Dict:
         axis_idx = int(rng.integers(0, 3))
@@ -384,9 +384,9 @@ class R1_3FixedAxisRotation(Rule):
 
 
 @dataclass
-class R1_4RotationDiscrete(Rule):
+class R1_3RotationDiscrete(Rule):
     def __init__(self) -> None:
-        super().__init__("R1-4", RuleDifficulty.SIMPLE, "旋转状态离散循环", "0/90/180 度离散旋转")
+        super().__init__("R1-3", RuleDifficulty.SIMPLE, "旋转状态离散循环", "0/90/180 度离散旋转")
 
     def sample_params(self, rng) -> Dict:
         axis_idx = int(rng.integers(0, 3))
@@ -427,9 +427,9 @@ class R1_4RotationDiscrete(Rule):
 
 
 @dataclass
-class R1_5TranslationArithmetic(Rule):
+class R1_4TranslationArithmetic(Rule):
     def __init__(self) -> None:
-        super().__init__("R1-5", RuleDifficulty.SIMPLE, "固定向量平移", "等差平移")
+        super().__init__("R1-4", RuleDifficulty.SIMPLE, "固定向量平移", "等差平移")
 
     def sample_params(self, rng) -> Dict:
         delta = rng.uniform(0.25, 0.5, size=3) * rng.choice([-1, 1], size=3)
@@ -508,9 +508,9 @@ class S08TranslationDiscrete(Rule):
 
 
 @dataclass
-class R1_6DensityArithmetic(Rule):
+class R1_5DensityArithmetic(Rule):
     def __init__(self) -> None:
-        super().__init__("R1-6", RuleDifficulty.SIMPLE, "密度等差", "density 按等差变化")
+        super().__init__("R1-5", RuleDifficulty.SIMPLE, "密度等差", "density 按等差变化")
 
     def sample_params(self, rng) -> Dict:
         delta_ratio = float(rng.uniform(3.0, 4.0))
@@ -679,9 +679,9 @@ class S11ShapeABA(Rule):
 
 
 @dataclass
-class R1_7ShapeChangeFollow(Rule):
+class R1_6ShapeChangeFollow(Rule):
     def __init__(self) -> None:
-        super().__init__("R1-7", RuleDifficulty.SIMPLE, "形状变化继承", "A->B 变化的位置在 C 继续变化")
+        super().__init__("R1-6", RuleDifficulty.SIMPLE, "形状变化继承", "A->B 变化的位置在 C 继续变化")
 
     def sample_params(self, rng) -> Dict:
         return {}
@@ -764,9 +764,9 @@ class R1_7ShapeChangeFollow(Rule):
 
 
 @dataclass
-class R1_8ScaleCentroidCoupled(Rule):
+class R1_7ScaleCentroidCoupled(Rule):
     def __init__(self) -> None:
-        super().__init__("R1-8", RuleDifficulty.SIMPLE, "质心守恒缩放", "缩放并平移以保持参与集合质心不变")
+        super().__init__("R1-7", RuleDifficulty.SIMPLE, "质心守恒缩放", "缩放并平移以保持参与集合质心不变")
 
     def sample_params(self, rng) -> Dict:
         k = float(rng.uniform(1.2, 1.6))
@@ -808,9 +808,9 @@ class R1_8ScaleCentroidCoupled(Rule):
 
 
 @dataclass
-class R1_15InverseDistanceSize(Rule):
+class R1_14InverseDistanceSize(Rule):
     def __init__(self) -> None:
-        super().__init__("R1-15", RuleDifficulty.SIMPLE, "距离尺寸倒数", "距离越近尺寸变化越剧烈")
+        super().__init__("R1-14", RuleDifficulty.SIMPLE, "距离尺寸倒数", "距离越近尺寸变化越剧烈")
 
     def sample_params(self, rng) -> Dict:
         k = float(rng.uniform(0.35, 0.65))
@@ -896,9 +896,9 @@ class R1_15InverseDistanceSize(Rule):
 
 
 @dataclass
-class R1_16InverseDistanceDensity(Rule):
+class R1_15InverseDistanceDensity(Rule):
     def __init__(self) -> None:
-        super().__init__("R1-16", RuleDifficulty.SIMPLE, "距离密度倒数", "距离越近密度变化越剧烈")
+        super().__init__("R1-15", RuleDifficulty.SIMPLE, "距离密度倒数", "距离越近密度变化越剧烈")
 
     def sample_params(self, rng) -> Dict:
         k = float(rng.uniform(0.5, 0.8))
@@ -981,9 +981,9 @@ class R1_16InverseDistanceDensity(Rule):
 
 
 @dataclass
-class R1_17ShapeCountArithmetic(Rule):
+class R1_16ShapeCountArithmetic(Rule):
     def __init__(self) -> None:
-        super().__init__("R1-17", RuleDifficulty.SIMPLE, "几何体个数变化", "形状计数等差增加")
+        super().__init__("R1-16", RuleDifficulty.SIMPLE, "几何体个数变化", "形状计数等差增加")
 
     def sample_params(self, rng) -> Dict:
         return {}
@@ -1095,15 +1095,15 @@ class R1_17ShapeCountArithmetic(Rule):
 def build_simple_rules() -> List[Rule]:
     return [
         R1_1ScaleArithmetic(),
-        R1_2AxisPermutation(),
+        R2_12AxisPermutation(),
         R2_2AnisotropicGeometric(),
-        R1_3FixedAxisRotation(),
-        R1_4RotationDiscrete(),
-        R1_5TranslationArithmetic(),
-        R1_6DensityArithmetic(),
-        R1_7ShapeChangeFollow(),
-        R1_8ScaleCentroidCoupled(),
-        R1_15InverseDistanceSize(),
-        R1_16InverseDistanceDensity(),
-        R1_17ShapeCountArithmetic(),
+        R1_2FixedAxisRotation(),
+        R1_3RotationDiscrete(),
+        R1_4TranslationArithmetic(),
+        R1_5DensityArithmetic(),
+        R1_6ShapeChangeFollow(),
+        R1_7ScaleCentroidCoupled(),
+        R1_14InverseDistanceSize(),
+        R1_15InverseDistanceDensity(),
+        R1_16ShapeCountArithmetic(),
     ]
