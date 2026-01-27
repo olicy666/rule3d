@@ -741,6 +741,8 @@ class R3_5CycleConsume(Rule):
         return [np.array([radius * math.cos(a), radius * math.sin(a), 0.0]) for a in angles]
 
     def _layout_positions(self, count: int) -> tuple[List[np.ndarray], str]:
+        if count == 1:
+            return [np.array([0.0, 0.0, 0.0])], "single"
         if count == 2:
             return [np.array([-0.6, 0.0, 0.0]), np.array([0.6, 0.0, 0.0])], "line"
         if count == 3:
