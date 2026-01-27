@@ -767,7 +767,7 @@ class R3_4DensityCycleConsume(Rule):
 
     @staticmethod
     def _density_levels() -> List[float]:
-        return [0.6, 0.8, 1.0, 1.2, 1.4, 1.8]
+        return [0.3, 0.6, 1.0, 1.6, 2.2, 3.0]
 
     def generate_triplet(self, params, rng):
         direction = params.get("direction", "cw")
