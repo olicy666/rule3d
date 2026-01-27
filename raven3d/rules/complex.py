@@ -729,7 +729,7 @@ class R3_6OrientationShift(Rule):
 @dataclass
 class R3_5CycleConsume(Rule):
     def __init__(self) -> None:
-        super().__init__("R3-5", RuleDifficulty.COMPLEX, "循环吞噬", "大几何体沿顺/逆时针吞噬相邻对象")
+        super().__init__("R3-5", RuleDifficulty.COMPLEX, "循环吞噬", "多对象按顺/逆时针吞噬相邻对象")
 
     def sample_params(self, rng) -> Dict:
         direction = "cw" if rng.random() < 0.5 else "ccw"
@@ -768,12 +768,8 @@ class R3_5CycleConsume(Rule):
         objs = [random_object(rng, shape=base_shape) for _ in range(6)]
 
         size_levels = self._size_levels()
-        pred_id = int(rng.integers(0, 6))
-        other_sizes = size_levels[:-1]
-        rng.shuffle(other_sizes)
-        size_map = {}
-        for idx in range(6):
-            size_map[idx] = size_levels[-1] if idx == pred_id else other_sizes.pop()
+        rng.shuffle(size_levels)
+        size_map = {idx: size_levels[idx] for idx in range(6)}
 
         for obj_idx, obj in enumerate(objs):
             size_val = size_map[obj_idx]
@@ -789,20 +785,31 @@ class R3_5CycleConsume(Rule):
             positions = [scale * (rot @ p) for p in positions]
             return positions, layout_name
 
-        order = list(range(6))
-        rng.shuffle(order)
-
-        def remove_neighbor(cur_order: List[int]) -> List[int]:
-            pos = cur_order.index(pred_id)
+        def next_order(cur_order: List[int]) -> List[int]:
+            sizes = [size_map[idx] for idx in cur_order]
+            k = (len(cur_order) + 1) // 2
+            eater_positions = sorted(range(len(cur_order)), key=lambda i: sizes[i], reverse=True)[:k]
+            eater_set = set(eater_positions)
             offset = 1 if direction == "cw" else -1
-            prey_pos = (pos + offset) % len(cur_order)
-            new_order = cur_order[:]
-            new_order.pop(prey_pos)
-            return new_order
+            remove_positions = []
+            for eater_pos in eater_positions:
+                prey_pos = (eater_pos + offset) % len(cur_order)
+                if prey_pos in eater_set:
+                    continue
+                remove_positions.append(prey_pos)
+            remove_set = set(remove_positions)
+            return [obj_id for idx, obj_id in enumerate(cur_order) if idx not in remove_set]
 
-        order_a = order
-        order_b = remove_neighbor(order_a)
-        order_c = remove_neighbor(order_b)
+        order_a = list(range(6))
+        for _ in range(60):
+            rng.shuffle(order_a)
+            order_b = next_order(order_a)
+            order_c = next_order(order_b)
+            if len(order_b) < len(order_a) and len(order_c) < len(order_b) and len(order_c) >= 2:
+                break
+        else:
+            order_b = next_order(order_a)
+            order_c = next_order(order_b)
 
         def min_pairwise_distance(points: List[np.ndarray]) -> float:
             if len(points) < 2:
@@ -846,10 +853,10 @@ class R3_5CycleConsume(Rule):
             "cycle-consume",
             {
                 "direction": direction,
-                "pred_id": pred_id,
                 "shape": base_shape,
                 "rotation_euler": base_rot.tolist(),
                 "scale": scale,
+                "sizes": [size_map[i] for i in range(6)],
                 "orders": [order_a, order_b, order_c],
             },
             v,
@@ -877,27 +884,12 @@ class R3_5CycleConsume(Rule):
             return (desc.get("shape", ""), tuple(r), tuple(rot), round(float(desc.get("density", 1.0)), 4))
 
         b_descs = frames[1].get("objects", [])
-        c_descs = frames[2].get("objects", [])
-        if len(b_descs) != 5 or len(c_descs) != 4:
-            return [], []
-
-        b_sigs = [signature(d) for d in b_descs]
-        c_sigs = [signature(d) for d in c_descs]
-        c_pool = c_sigs[:]
-        missing_idx = None
-        for i, sig in enumerate(b_sigs):
-            if sig in c_pool:
-                c_pool.remove(sig)
-            else:
-                missing_idx = i
-                break
-        if missing_idx is None:
+        if len(b_descs) < 2:
             return [], []
 
         b_objs = [obj_from_desc(d) for d in b_descs]
-        pred_idx = int(np.argmax([obj.volume() for obj in b_objs]))
-
         params = meta.get("pattern_params", {})
+        direction = params.get("direction", "cw")
         base_rot = np.array(params.get("rotation_euler", [0.0, 0.0, 0.0]), dtype=float)
         scale = float(params.get("scale", 1.0))
         rot = rotation_matrix(base_rot)
@@ -906,22 +898,96 @@ class R3_5CycleConsume(Rule):
             positions, _layout_name = self._layout_positions(count)
             return [scale * (rot @ p) for p in positions]
 
-        def build_with(keep_indices: List[int]) -> Scene:
-            positions = layout(len(keep_indices))
+        def min_pairwise_distance(points: List[np.ndarray]) -> float:
+            if len(points) < 2:
+                return float("inf")
+            min_dist = float("inf")
+            for i in range(len(points)):
+                for j in range(i + 1, len(points)):
+                    d = float(np.linalg.norm(points[i] - points[j]))
+                    if d < min_dist:
+                        min_dist = d
+            return min_dist
+
+        def build_with(objs_in_order: List[ObjectState]) -> Scene:
+            positions = layout(len(objs_in_order))
+            max_rad = max(approx_radius(obj) for obj in objs_in_order)
+            min_dist = min_pairwise_distance(positions)
+            gap = 0.08
+            if min_dist < 2 * max_rad + gap:
+                scale_factor = (2 * max_rad + gap) / max(min_dist, 1e-6)
+                positions = [p * scale_factor for p in positions]
             arranged: List[ObjectState] = []
-            for pos_idx, obj_idx in enumerate(keep_indices):
-                obj = b_objs[obj_idx].copy()
-                obj.p = positions[pos_idx]
-                arranged.append(obj)
+            for pos_idx, obj in enumerate(objs_in_order):
+                o = obj.copy()
+                o.p = positions[pos_idx]
+                arranged.append(o)
             return scene_from_objects(arranged)
 
-        candidate_remove = [i for i in range(len(b_objs)) if i != pred_idx and i != missing_idx]
+        def eater_positions(cur_objs: List[ObjectState]) -> List[int]:
+            sizes = [size(o) for o in cur_objs]
+            k = (len(cur_objs) + 1) // 2
+            return sorted(range(len(cur_objs)), key=lambda i: sizes[i], reverse=True)[:k]
+
+        def step(cur_objs: List[ObjectState], use_direction: str, conflict_rule: bool, use_smallest: bool = False) -> List[ObjectState]:
+            if len(cur_objs) <= 1:
+                return cur_objs
+            if use_smallest:
+                sizes = [size(o) for o in cur_objs]
+                k = (len(cur_objs) + 1) // 2
+                eater_pos = sorted(range(len(cur_objs)), key=lambda i: sizes[i])[:k]
+            else:
+                eater_pos = eater_positions(cur_objs)
+            eater_set = set(eater_pos)
+            offset = 1 if use_direction == "cw" else -1
+            remove_positions = []
+            for pos in eater_pos:
+                prey = (pos + offset) % len(cur_objs)
+                if conflict_rule and prey in eater_set:
+                    continue
+                remove_positions.append(prey)
+            remove_set = set(remove_positions)
+            return [obj for idx, obj in enumerate(cur_objs) if idx not in remove_set]
+
+        correct_next = step(b_objs, direction, conflict_rule=True)
+
+        candidates = [
+            ("顺逆方向错误", step(b_objs, "ccw" if direction == "cw" else "cw", conflict_rule=True)),
+            ("忽略吞噬冲突规则", step(b_objs, direction, conflict_rule=False)),
+            ("吞噬主体选择错误", step(b_objs, direction, conflict_rule=True, use_smallest=True)),
+        ]
+
         distractors = []
         reasons = []
-        for idx in candidate_remove:
-            keep = [i for i in range(len(b_objs)) if i != idx]
-            distractors.append(build_with(keep))
-            reasons.append("吞噬目标选择错误")
+        seen = set()
+        correct_sig = tuple(signature(o.as_dict()) for o in correct_next)
+        for reason, objs in candidates:
+            sig = tuple(signature(o.as_dict()) for o in objs)
+            if sig == correct_sig:
+                continue
+            if sig in seen:
+                continue
+            seen.add(sig)
+            distractors.append(build_with(objs))
+            reasons.append(reason)
+            if len(distractors) == 3:
+                break
+
+        if len(distractors) < 3:
+            extra = [("未发生吞噬", b_objs)]
+            if len(b_objs) > 2:
+                for i in range(len(b_objs)):
+                    keep = [obj for j, obj in enumerate(b_objs) if j != i]
+                    extra.append(("吞噬对象选择错误", keep))
+            for reason, objs in extra:
+                sig = tuple(signature(o.as_dict()) for o in objs)
+                if sig == correct_sig or sig in seen:
+                    continue
+                seen.add(sig)
+                distractors.append(build_with(objs))
+                reasons.append(reason)
+                if len(distractors) == 3:
+                    break
 
         return distractors, reasons
 
