@@ -629,7 +629,8 @@ class R3_6OrientationShift(Rule):
     def generate_triplet(self, params, rng):
         count = int(params["count"])
         positions, layout_name = self._layout_positions(count)
-        base_shape = str(rng.choice(SHAPES))
+        shape_pool = [s for s in SHAPES if s not in ("sphere", "torus")]
+        base_shape = str(rng.choice(shape_pool))
         objs = [random_object(rng, shape=base_shape) for _ in range(count)]
         involved = list(range(count))
         levels = self._orientation_levels(count)
@@ -803,11 +804,28 @@ class R3_5CycleConsume(Rule):
         order_b = remove_neighbor(order_a)
         order_c = remove_neighbor(order_b)
 
+        def min_pairwise_distance(points: List[np.ndarray]) -> float:
+            if len(points) < 2:
+                return float("inf")
+            min_dist = float("inf")
+            for i in range(len(points)):
+                for j in range(i + 1, len(points)):
+                    d = float(np.linalg.norm(points[i] - points[j]))
+                    if d < min_dist:
+                        min_dist = d
+            return min_dist
+
         def build_frame(cur_order: List[int]) -> Scene:
             positions, _layout_name = layout(len(cur_order))
+            arranged_objs = [objs[obj_idx].copy() for obj_idx in cur_order]
+            max_rad = max(approx_radius(obj) for obj in arranged_objs)
+            min_dist = min_pairwise_distance(positions)
+            gap = 0.08
+            if min_dist < 2 * max_rad + gap:
+                scale_factor = (2 * max_rad + gap) / max(min_dist, 1e-6)
+                positions = [p * scale_factor for p in positions]
             arranged: List[ObjectState] = []
-            for pos_idx, obj_idx in enumerate(cur_order):
-                obj = objs[obj_idx].copy()
+            for pos_idx, obj in enumerate(arranged_objs):
                 obj.p = positions[pos_idx]
                 arranged.append(obj)
             return scene_from_objects(arranged)
