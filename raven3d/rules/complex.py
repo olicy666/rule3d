@@ -244,7 +244,7 @@ class R3_1SpiralAscend(Rule):
         super().__init__("R3-1", RuleDifficulty.COMPLEX, "螺旋上升", "多对象螺旋上升等差高度")
 
     def sample_params(self, rng) -> Dict:
-        count = int(rng.integers(3, 7))
+        count = int(rng.integers(3, 6))
         return {"count": count}
 
     def generate_triplet(self, params, rng):
@@ -804,53 +804,52 @@ class R3_8DensityShift(Rule):
         raise ValueError(f"Unsupported object count {count}")
 
     @staticmethod
-    def _distinct_densities(rng, count: int) -> List[float]:
-        densities: List[float] = []
-        attempts = 0
-        while len(densities) < count and attempts < 200:
-            candidate = float(rng.uniform(0.6, 1.4))
-            if all(abs(candidate - d) > 0.08 for d in densities):
-                densities.append(candidate)
-            attempts += 1
-        if len(densities) < count:
-            base = float(rng.uniform(0.7, 1.1))
-            step = 0.12
-            densities = [max(base + step * (i - (count - 1) / 2), 0.2) for i in range(count)]
-        return densities
+    def _density_levels(count: int) -> List[float]:
+        if count == 3:
+            return [0.6, 1.0, 1.4]
+        if count == 4:
+            return [0.55, 0.85, 1.15, 1.45]
+        if count == 5:
+            return [0.5, 0.8, 1.1, 1.4, 1.7]
+        if count == 6:
+            return [0.45, 0.7, 0.95, 1.2, 1.45, 1.7]
+        raise ValueError(f"Unsupported object count {count}")
 
     def generate_triplet(self, params, rng):
         count = int(params["count"])
         positions, layout_name = self._layout_positions(count)
         objs = [random_object(rng) for _ in range(count)]
         involved = list(range(count))
-        base_densities = self._distinct_densities(rng, count)
+        density_levels = self._density_levels(count)
+        level_indices = list(range(count))
+        rng.shuffle(level_indices)
 
-        for obj, pos, den in zip(objs, positions, base_densities):
+        for obj, pos, level_idx in zip(objs, positions, level_indices):
             obj.p = pos
-            obj.density = den
+            obj.density = density_levels[level_idx]
             obj.rotation = obj.rotation + rng.uniform(-math.pi / 18, math.pi / 18, size=3)
             obj.r = obj.r * rng.uniform(0.9, 1.1, size=3)
 
-        factors = []
-        for _ in range(count):
-            roll = rng.random()
-            if roll < 0.4:
-                factors.append(float(rng.uniform(1.2, 1.6)))
-            elif roll < 0.8:
-                factors.append(float(rng.uniform(0.6, 0.85)))
-            else:
-                factors.append(1.0)
-        if all(abs(f - 1.0) < 1e-6 for f in factors):
-            idx = int(rng.integers(0, count))
-            factors[idx] = float(rng.uniform(1.2, 1.6))
+        perm = rng.permutation(count).tolist()
+        if all(i == p for i, p in enumerate(perm)):
+            perm[0], perm[1] = perm[1], perm[0]
 
-        a_objs = clone_objects(objs)
-        b_objs = clone_objects(a_objs)
-        for i, f in enumerate(factors):
-            b_objs[i] = apply_density(b_objs[i], f)
-        c_objs = clone_objects(b_objs)
-        for i, f in enumerate(factors):
-            c_objs[i] = apply_density(c_objs[i], f)
+        def apply_map(indices: List[int], mapping: List[int]) -> List[int]:
+            return [mapping[idx] for idx in indices]
+
+        a_indices = level_indices
+        b_indices = apply_map(a_indices, perm)
+        c_indices = apply_map(b_indices, perm)
+
+        def build_with(indices: List[int]) -> List:
+            arranged = clone_objects(objs)
+            for obj, idx in zip(arranged, indices):
+                obj.density = density_levels[idx]
+            return arranged
+
+        a_objs = build_with(a_indices)
+        b_objs = build_with(b_indices)
+        c_objs = build_with(c_indices)
 
         scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
         v = [[obj.density for obj in s.objects] for s in scenes]
@@ -861,8 +860,16 @@ class R3_8DensityShift(Rule):
             involved,
             ["d"],
             ["den(Oi)"],
-            "per-object-scale",
-            {"count": count, "layout": layout_name, "factors": factors},
+            "density-map",
+            {
+                "count": count,
+                "layout": layout_name,
+                "levels": density_levels,
+                "perm": perm,
+                "a_indices": a_indices,
+                "b_indices": b_indices,
+                "c_indices": c_indices,
+            },
             v,
             scenes,
         )
@@ -871,29 +878,34 @@ class R3_8DensityShift(Rule):
     def make_distractors(self, scene_c: Scene, rng, meta: Dict) -> Tuple[list[Scene], list[str]]:
         if not scene_c.objects:
             return [], []
-        v = meta.get("v", {})
-        v2 = v.get("v2")
-        v3 = v.get("v3")
-        factors = meta.get("pattern_params", {}).get("factors")
-        if not (v2 and v3 and factors):
+        params = meta.get("pattern_params", {})
+        levels = params.get("levels")
+        perm = params.get("perm")
+        b_indices = params.get("b_indices")
+        if not (levels and perm and b_indices):
             return [], []
-        f = np.array(factors, dtype=float)
-        if f.shape[0] != len(scene_c.objects):
+        if len(b_indices) != len(scene_c.objects):
             return [], []
-        v2_arr = np.array(v2, dtype=float)
 
-        def build_with(densities: np.ndarray) -> Scene:
+        def apply_map(indices: List[int], mapping: List[int]) -> List[int]:
+            return [mapping[idx] for idx in indices]
+
+        def build_with(indices: List[int]) -> Scene:
             objs = clone_objects(scene_c.objects)
-            for i, den in enumerate(densities.tolist()):
+            for i, level_idx in enumerate(indices):
                 obj = objs[i].copy()
-                obj.density = max(float(den), 1e-3)
+                obj.density = max(float(levels[level_idx]), 1e-3)
                 objs[i] = obj
             return scene_from_objects(objs)
 
-        wrong_single = v2_arr
-        wrong_reverse = v2_arr / np.where(np.abs(f) < 1e-6, 1.0, f)
-        wrong_over = v2_arr * (f ** 2)
-        distractors = [build_with(x) for x in [wrong_single, wrong_reverse, wrong_over]]
+        inv_perm = [0] * len(perm)
+        for i, p in enumerate(perm):
+            inv_perm[p] = i
+
+        no_change = b_indices
+        reverse = apply_map(b_indices, inv_perm)
+        over = apply_map(apply_map(b_indices, perm), perm)
+        distractors = [build_with(x) for x in [no_change, reverse, over]]
         reasons = [
             "密度未继续变化，停留在上一帧",
             "密度变化方向反向",
@@ -908,7 +920,7 @@ class R3_9ScaleShift(Rule):
         super().__init__("R3-9", RuleDifficulty.COMPLEX, "多对象尺度变化", "多对象尺度按位置延续增减")
 
     def sample_params(self, rng) -> Dict:
-        count = int(rng.integers(2, 6))
+        count = int(rng.integers(3, 7))
         return {"count": count}
 
     @staticmethod
@@ -933,19 +945,14 @@ class R3_9ScaleShift(Rule):
         raise ValueError(f"Unsupported object count {count}")
 
     @staticmethod
-    def _distinct_size_factors(rng, count: int) -> List[float]:
-        factors: List[float] = []
-        attempts = 0
-        while len(factors) < count and attempts < 200:
-            candidate = float(rng.uniform(0.75, 1.35))
-            if all(abs(candidate - f) > 0.12 for f in factors):
-                factors.append(candidate)
-            attempts += 1
-        if len(factors) < count:
-            base = float(rng.uniform(0.85, 1.15))
-            step = 0.15
-            factors = [max(base + step * (i - (count - 1) / 2), 0.3) for i in range(count)]
-        return factors
+    def _size_levels(count: int) -> List[float]:
+        if count == 3:
+            return [0.7, 1.0, 1.3]
+        if count == 4:
+            return [0.65, 0.9, 1.15, 1.4]
+        if count == 5:
+            return [0.6, 0.8, 1.0, 1.2, 1.4]
+        raise ValueError(f"Unsupported object count {count}")
 
     def generate_triplet(self, params, rng):
         count = int(params["count"])
@@ -953,33 +960,37 @@ class R3_9ScaleShift(Rule):
         base_shape = str(rng.choice(SHAPES))
         objs = [random_object(rng, shape=base_shape) for _ in range(count)]
         involved = list(range(count))
-        if count == 3:
-            # Three clearly separated size levels for easy comparison.
-            base_levels = [0.7, 1.0, 1.3]
-            jitter = rng.uniform(-0.03, 0.03, size=3)
-            base_factors = [max(0.45, float(s + j)) for s, j in zip(base_levels, jitter.tolist())]
-            rng.shuffle(base_factors)
-        else:
-            base_factors = self._distinct_size_factors(rng, count)
+        size_levels = self._size_levels(count)
+        level_indices = list(range(count))
+        rng.shuffle(level_indices)
 
-        for obj, pos, factor in zip(objs, positions, base_factors):
+        for obj, pos, level_idx in zip(objs, positions, level_indices):
             obj.p = pos
-            obj.r = np.array([factor, factor, factor], dtype=float)
+            size_val = size_levels[level_idx]
+            obj.r = np.array([size_val, size_val, size_val], dtype=float)
             obj.rotation = obj.rotation + rng.uniform(-math.pi / 18, math.pi / 18, size=3)
 
-        # Single-direction scale change, inferred from ref1 -> ref2 and continued to ref3.
-        scale_factor = (
-            float(rng.uniform(1.2, 1.6)) if rng.random() < 0.5 else float(rng.uniform(0.6, 0.85))
-        )
-        factors = [scale_factor for _ in range(count)]
+        perm = rng.permutation(count).tolist()
+        if all(i == p for i, p in enumerate(perm)):
+            perm[0], perm[1] = perm[1], perm[0]
 
-        a_objs = clone_objects(objs)
-        b_objs = clone_objects(a_objs)
-        for i, f in enumerate(factors):
-            b_objs[i] = apply_scale(b_objs[i], f)
-        c_objs = clone_objects(b_objs)
-        for i, f in enumerate(factors):
-            c_objs[i] = apply_scale(c_objs[i], f)
+        def apply_map(indices: List[int], mapping: List[int]) -> List[int]:
+            return [mapping[idx] for idx in indices]
+
+        a_indices = level_indices
+        b_indices = apply_map(a_indices, perm)
+        c_indices = apply_map(b_indices, perm)
+
+        def build_with(indices: List[int]) -> List:
+            arranged = clone_objects(objs)
+            for obj, idx in zip(arranged, indices):
+                size_val = size_levels[idx]
+                obj.r = np.array([size_val, size_val, size_val], dtype=float)
+            return arranged
+
+        a_objs = build_with(a_indices)
+        b_objs = build_with(b_indices)
+        c_objs = build_with(c_indices)
 
         scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
         v = [[size(obj) for obj in s.objects] for s in scenes]
@@ -990,8 +1001,16 @@ class R3_9ScaleShift(Rule):
             involved,
             ["r"],
             ["size(Oi)"],
-            "per-object-scale",
-            {"count": count, "layout": layout_name, "factors": factors},
+            "size-map",
+            {
+                "count": count,
+                "layout": layout_name,
+                "levels": size_levels,
+                "perm": perm,
+                "a_indices": a_indices,
+                "b_indices": b_indices,
+                "c_indices": c_indices,
+            },
             v,
             scenes,
         )
@@ -1000,24 +1019,35 @@ class R3_9ScaleShift(Rule):
     def make_distractors(self, scene_c: Scene, rng, meta: Dict) -> Tuple[list[Scene], list[str]]:
         if not scene_c.objects:
             return [], []
-        factors = meta.get("pattern_params", {}).get("factors")
-        if not factors:
+        params = meta.get("pattern_params", {})
+        levels = params.get("levels")
+        perm = params.get("perm")
+        b_indices = params.get("b_indices")
+        if not (levels and perm and b_indices):
             return [], []
-        f = np.array(factors, dtype=float)
-        if f.shape[0] != len(scene_c.objects):
+        if len(b_indices) != len(scene_c.objects):
             return [], []
-        safe_f = np.where(np.abs(f) < 1e-6, 1.0, f)
 
-        def build_with(scale_factors: np.ndarray) -> Scene:
+        def apply_map(indices: List[int], mapping: List[int]) -> List[int]:
+            return [mapping[idx] for idx in indices]
+
+        def build_with(indices: List[int]) -> Scene:
             objs = clone_objects(scene_c.objects)
-            for i, factor in enumerate(scale_factors.tolist()):
-                objs[i] = apply_scale(objs[i], float(factor))
+            for i, level_idx in enumerate(indices):
+                size_val = float(levels[level_idx])
+                obj = objs[i].copy()
+                obj.r = np.array([size_val, size_val, size_val], dtype=float)
+                objs[i] = obj
             return scene_from_objects(objs)
 
-        step_back = 1.0 / safe_f
-        reverse = 1.0 / (safe_f ** 2)
-        over = safe_f ** 2
-        distractors = [build_with(x) for x in [step_back, reverse, over]]
+        inv_perm = [0] * len(perm)
+        for i, p in enumerate(perm):
+            inv_perm[p] = i
+
+        no_change = b_indices
+        reverse = apply_map(b_indices, inv_perm)
+        over = apply_map(apply_map(b_indices, perm), perm)
+        distractors = [build_with(x) for x in [no_change, reverse, over]]
         reasons = [
             "尺度未继续变化，停留在上一帧",
             "尺度变化方向反向",
@@ -1121,26 +1151,31 @@ class R3_11SinePositionShift(Rule):
         return positions, angles_deg
 
     def sample_params(self, rng) -> Dict:
-        return {}
+        count = int(rng.integers(3, 7))
+        return {"count": count}
 
     def generate_triplet(self, params, rng):
         positions, angles_deg = self._sine_positions()
         n = len(positions)
+        count = int(params.get("count", 3))
         step = 1 if rng.random() < 0.5 else -1
         if step == 1:
-            # Need room for start + 1 + 2*step within [0, n-1]
-            start = int(rng.integers(0, n - 3))
+            # Need room for start + (count - 1) + 2*step within [0, n-1]
+            max_start = n - count - 2
+            start = int(rng.integers(0, max_start + 1))
         else:
-            start = int(rng.integers(2, n - 1))
-            if start < 2:
-                start = 2
+            min_start = 2
+            max_start = n - count
+            start = int(rng.integers(min_start, max_start + 1))
 
-        idx_a = [start, start + 1]
-        idx_b = [start + step, start + 1 + step]
-        idx_c = [start + 2 * step, start + 1 + 2 * step]
+        idx_a = [start + i for i in range(count)]
+        idx_b = [start + i + step for i in range(count)]
+        idx_c = [start + i + 2 * step for i in range(count)]
 
-        objs = init_objects(rng, 2, m=2)
-        involved = [0, 1]
+        objs = init_objects(rng, count, m=count)
+        for obj in objs:
+            obj.r = obj.r * float(rng.uniform(0.55, 0.7))
+        involved = list(range(count))
 
         def build_frame(indices: List[int]) -> List:
             arranged = clone_objects(objs)
@@ -1156,12 +1191,12 @@ class R3_11SinePositionShift(Rule):
         meta = build_rule_meta(
             self,
             "R3",
-            2,
+            count,
             involved,
             ["p"],
             ["sin-pos"],
             "sine-adjacent",
-            {"angles_deg": angles_deg, "step": step, "start": start},
+            {"angles_deg": angles_deg, "step": step, "start": start, "count": count},
             v,
             scenes,
         )
@@ -1186,13 +1221,16 @@ class R3_11SinePositionShift(Rule):
                 obj.p = positions[int(idx)]
             return scene_from_objects(objs)
 
-        gap_base = int(idx_c[0])
-        gap_idx = gap_base + 2 if gap_base + 2 < len(positions) else gap_base - 2
-        if gap_idx < 0 or gap_idx >= len(positions):
-            gap_idx = int(idx_a[0])
-        gap_pair = [gap_base, gap_idx]
+        gap_indices = []
+        for i in idx_c:
+            cand = int(i) + 2 * step
+            if 0 <= cand < len(positions):
+                gap_indices.append(cand)
+            else:
+                alt = int(i) - 2 * step
+                gap_indices.append(alt if 0 <= alt < len(positions) else int(i))
 
-        candidates = [idx_b, idx_a, gap_pair]
+        candidates = [idx_b, idx_a, gap_indices]
         distractors = [build_from(pair) for pair in candidates]
         reasons = [
             "位置未继续滑动，停留在上一帧",
