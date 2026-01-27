@@ -779,7 +779,7 @@ class R3_8DensityShift(Rule):
         super().__init__("R3-8", RuleDifficulty.COMPLEX, "多对象密度变化", "多对象密度按位置延续增减")
 
     def sample_params(self, rng) -> Dict:
-        count = int(rng.integers(2, 6))
+        count = int(rng.integers(3, 6))
         return {"count": count}
 
     @staticmethod
@@ -950,27 +950,28 @@ class R3_9ScaleShift(Rule):
     def generate_triplet(self, params, rng):
         count = int(params["count"])
         positions, layout_name = self._layout_positions(count)
-        objs = [random_object(rng) for _ in range(count)]
+        base_shape = str(rng.choice(SHAPES))
+        objs = [random_object(rng, shape=base_shape) for _ in range(count)]
         involved = list(range(count))
-        base_factors = self._distinct_size_factors(rng, count)
+        if count == 3:
+            # Three clearly separated size levels for easy comparison.
+            base_levels = [0.7, 1.0, 1.3]
+            jitter = rng.uniform(-0.03, 0.03, size=3)
+            base_factors = [max(0.45, float(s + j)) for s, j in zip(base_levels, jitter.tolist())]
+            rng.shuffle(base_factors)
+        else:
+            base_factors = self._distinct_size_factors(rng, count)
 
         for obj, pos, factor in zip(objs, positions, base_factors):
             obj.p = pos
-            obj.r = obj.r * factor
+            obj.r = np.array([factor, factor, factor], dtype=float)
             obj.rotation = obj.rotation + rng.uniform(-math.pi / 18, math.pi / 18, size=3)
 
-        factors = []
-        for _ in range(count):
-            roll = rng.random()
-            if roll < 0.4:
-                factors.append(float(rng.uniform(1.2, 1.6)))
-            elif roll < 0.8:
-                factors.append(float(rng.uniform(0.6, 0.85)))
-            else:
-                factors.append(1.0)
-        if all(abs(f - 1.0) < 1e-6 for f in factors):
-            idx = int(rng.integers(0, count))
-            factors[idx] = float(rng.uniform(1.2, 1.6))
+        # Single-direction scale change, inferred from ref1 -> ref2 and continued to ref3.
+        scale_factor = (
+            float(rng.uniform(1.2, 1.6)) if rng.random() < 0.5 else float(rng.uniform(0.6, 0.85))
+        )
+        factors = [scale_factor for _ in range(count)]
 
         a_objs = clone_objects(objs)
         b_objs = clone_objects(a_objs)
@@ -1052,9 +1053,7 @@ class R3_10ShapeShift(Rule):
                 np.array([-0.7, 0.45, 0.0]),
             ], "rectangle"
         if count == 5:
-            base = self._regular_polygon(5, 0.7)
-            star_order = [0, 2, 4, 1, 3]
-            return [base[i] for i in star_order], "pentagram"
+            return self._regular_polygon(5, 0.7), "pentagon"
         raise ValueError(f"Unsupported object count {count}")
 
     @staticmethod
