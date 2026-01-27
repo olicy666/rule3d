@@ -629,7 +629,8 @@ class R3_6OrientationShift(Rule):
     def generate_triplet(self, params, rng):
         count = int(params["count"])
         positions, layout_name = self._layout_positions(count)
-        objs = [random_object(rng, shape="triangular_prism") for _ in range(count)]
+        base_shape = str(rng.choice(SHAPES))
+        objs = [random_object(rng, shape=base_shape) for _ in range(count)]
         involved = list(range(count))
         levels = self._orientation_levels(count)
         level_indices = list(range(count))
@@ -721,6 +722,189 @@ class R3_6OrientationShift(Rule):
             "姿态变化方向反向",
             "姿态变化跨度过大",
         ]
+        return distractors, reasons
+
+
+@dataclass
+class R3_5CycleConsume(Rule):
+    def __init__(self) -> None:
+        super().__init__("R3-5", RuleDifficulty.COMPLEX, "循环吞噬", "大几何体沿顺/逆时针吞噬相邻对象")
+
+    def sample_params(self, rng) -> Dict:
+        direction = "cw" if rng.random() < 0.5 else "ccw"
+        return {"direction": direction}
+
+    @staticmethod
+    def _regular_polygon(count: int, radius: float) -> List[np.ndarray]:
+        angles = [math.pi / 2 - i * 2 * math.pi / count for i in range(count)]
+        return [np.array([radius * math.cos(a), radius * math.sin(a), 0.0]) for a in angles]
+
+    def _layout_positions(self, count: int) -> tuple[List[np.ndarray], str]:
+        if count == 2:
+            return [np.array([-0.6, 0.0, 0.0]), np.array([0.6, 0.0, 0.0])], "line"
+        if count == 3:
+            return self._regular_polygon(3, 0.65), "triangle"
+        if count == 4:
+            return [
+                np.array([-0.7, -0.45, 0.0]),
+                np.array([0.7, -0.45, 0.0]),
+                np.array([0.7, 0.45, 0.0]),
+                np.array([-0.7, 0.45, 0.0]),
+            ], "rectangle"
+        if count == 5:
+            return self._regular_polygon(5, 0.7), "pentagon"
+        if count == 6:
+            return self._regular_polygon(6, 0.75), "hexagon"
+        raise ValueError(f"Unsupported object count {count}")
+
+    @staticmethod
+    def _size_levels() -> List[float]:
+        return [0.6, 0.8, 1.0, 1.2, 1.4, 1.8]
+
+    def generate_triplet(self, params, rng):
+        direction = params.get("direction", "cw")
+        base_shape = str(rng.choice(SHAPES))
+        objs = [random_object(rng, shape=base_shape) for _ in range(6)]
+
+        size_levels = self._size_levels()
+        pred_id = int(rng.integers(0, 6))
+        other_sizes = size_levels[:-1]
+        rng.shuffle(other_sizes)
+        size_map = {}
+        for idx in range(6):
+            size_map[idx] = size_levels[-1] if idx == pred_id else other_sizes.pop()
+
+        for obj_idx, obj in enumerate(objs):
+            size_val = size_map[obj_idx]
+            obj.r = np.array([size_val, size_val, size_val], dtype=float)
+            obj.rotation = obj.rotation + rng.uniform(-math.pi / 18, math.pi / 18, size=3)
+
+        base_rot = rng.uniform(-math.pi / 10, math.pi / 10, size=3)
+        scale = float(rng.uniform(0.9, 1.05))
+        rot = rotation_matrix(base_rot)
+
+        def layout(count: int) -> tuple[List[np.ndarray], str]:
+            positions, layout_name = self._layout_positions(count)
+            positions = [scale * (rot @ p) for p in positions]
+            return positions, layout_name
+
+        order = list(range(6))
+        rng.shuffle(order)
+
+        def remove_neighbor(cur_order: List[int]) -> List[int]:
+            pos = cur_order.index(pred_id)
+            offset = 1 if direction == "cw" else -1
+            prey_pos = (pos + offset) % len(cur_order)
+            new_order = cur_order[:]
+            new_order.pop(prey_pos)
+            return new_order
+
+        order_a = order
+        order_b = remove_neighbor(order_a)
+        order_c = remove_neighbor(order_b)
+
+        def build_frame(cur_order: List[int]) -> Scene:
+            positions, _layout_name = layout(len(cur_order))
+            arranged: List[ObjectState] = []
+            for pos_idx, obj_idx in enumerate(cur_order):
+                obj = objs[obj_idx].copy()
+                obj.p = positions[pos_idx]
+                arranged.append(obj)
+            return scene_from_objects(arranged)
+
+        scene_a = build_frame(order_a)
+        scene_b = build_frame(order_b)
+        scene_c = build_frame(order_c)
+        scenes = [scene_a, scene_b, scene_c]
+
+        v = [order_a, order_b, order_c]
+        meta = build_rule_meta(
+            self,
+            "R3",
+            3,
+            list(range(len(scene_a.objects))),
+            ["p"],
+            ["count(O)"],
+            "cycle-consume",
+            {
+                "direction": direction,
+                "pred_id": pred_id,
+                "shape": base_shape,
+                "rotation_euler": base_rot.tolist(),
+                "scale": scale,
+                "orders": [order_a, order_b, order_c],
+            },
+            v,
+            scenes,
+        )
+        return scenes[0], scenes[1], scenes[2], meta
+
+    def make_distractors(self, scene_c: Scene, rng, meta: Dict) -> Tuple[list[Scene], list[str]]:
+        frames = meta.get("frames", [])
+        if len(frames) < 3:
+            return [], []
+
+        def obj_from_desc(desc: Dict) -> ObjectState:
+            return ObjectState(
+                shape=str(desc.get("shape", "cube")),
+                r=np.array(desc.get("r", [1.0, 1.0, 1.0]), dtype=float),
+                p=np.array(desc.get("p", [0.0, 0.0, 0.0]), dtype=float),
+                rotation=np.array(desc.get("rotation_euler", [0.0, 0.0, 0.0]), dtype=float),
+                density=float(desc.get("density", 1.0)),
+            )
+
+        def signature(desc: Dict) -> Tuple:
+            r = [round(float(x), 4) for x in desc.get("r", [0.0, 0.0, 0.0])]
+            rot = [round(float(x), 4) for x in desc.get("rotation_euler", [0.0, 0.0, 0.0])]
+            return (desc.get("shape", ""), tuple(r), tuple(rot), round(float(desc.get("density", 1.0)), 4))
+
+        b_descs = frames[1].get("objects", [])
+        c_descs = frames[2].get("objects", [])
+        if len(b_descs) != 5 or len(c_descs) != 4:
+            return [], []
+
+        b_sigs = [signature(d) for d in b_descs]
+        c_sigs = [signature(d) for d in c_descs]
+        c_pool = c_sigs[:]
+        missing_idx = None
+        for i, sig in enumerate(b_sigs):
+            if sig in c_pool:
+                c_pool.remove(sig)
+            else:
+                missing_idx = i
+                break
+        if missing_idx is None:
+            return [], []
+
+        b_objs = [obj_from_desc(d) for d in b_descs]
+        pred_idx = int(np.argmax([obj.volume() for obj in b_objs]))
+
+        params = meta.get("pattern_params", {})
+        base_rot = np.array(params.get("rotation_euler", [0.0, 0.0, 0.0]), dtype=float)
+        scale = float(params.get("scale", 1.0))
+        rot = rotation_matrix(base_rot)
+
+        def layout(count: int) -> List[np.ndarray]:
+            positions, _layout_name = self._layout_positions(count)
+            return [scale * (rot @ p) for p in positions]
+
+        def build_with(keep_indices: List[int]) -> Scene:
+            positions = layout(len(keep_indices))
+            arranged: List[ObjectState] = []
+            for pos_idx, obj_idx in enumerate(keep_indices):
+                obj = b_objs[obj_idx].copy()
+                obj.p = positions[pos_idx]
+                arranged.append(obj)
+            return scene_from_objects(arranged)
+
+        candidate_remove = [i for i in range(len(b_objs)) if i != pred_idx and i != missing_idx]
+        distractors = []
+        reasons = []
+        for idx in candidate_remove:
+            keep = [i for i in range(len(b_objs)) if i != idx]
+            distractors.append(build_with(keep))
+            reasons.append("吞噬目标选择错误")
+
         return distractors, reasons
 
 
@@ -2944,6 +3128,7 @@ def build_complex_rules() -> List[Rule]:
         R2_6RelativeOrientationInvariant(),
         R3_1SpiralAscend(),
         R3_3LineRotate(),
+        R3_5CycleConsume(),
         R3_6OrientationShift(),
         R3_7PositionCycle(),
         R3_8DensityShift(),
