@@ -806,13 +806,13 @@ class R3_8DensityShift(Rule):
     @staticmethod
     def _density_levels(count: int) -> List[float]:
         if count == 3:
-            return [0.6, 1.0, 1.4]
+            return [0.4, 1.0, 1.8]
         if count == 4:
-            return [0.55, 0.85, 1.15, 1.45]
+            return [0.35, 0.9, 1.45, 2.0]
         if count == 5:
-            return [0.5, 0.8, 1.1, 1.4, 1.7]
+            return [0.3, 0.8, 1.3, 1.8, 2.3]
         if count == 6:
-            return [0.45, 0.7, 0.95, 1.2, 1.45, 1.7]
+            return [0.25, 0.7, 1.15, 1.6, 2.05, 2.5]
         raise ValueError(f"Unsupported object count {count}")
 
     def generate_triplet(self, params, rng):
