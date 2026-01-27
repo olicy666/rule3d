@@ -264,44 +264,76 @@ class R3_1SpiralAscend(Rule):
         z_spacing = 0.0  # 物体之间的高度间距（恒定）
 
         for attempt in range(60):
+            # 统一使用球体，更容易看出螺旋线
             objs = [random_object(rng) for _ in range(count)]
-            size_scale = float(rng.uniform(0.45, 0.65)) * (0.95 ** attempt)
+            # 统一大小：所有几何体使用相同的大小，形成清晰的螺旋线
+            uniform_size = float(rng.uniform(0.25, 0.35)) * (0.95 ** attempt)
             for obj in objs:
-                obj.r = obj.r * size_scale
-                # 物体可以有不同的初始旋转，但位置遵循螺旋线
-                obj.rotation = obj.rotation + rng.uniform(-math.pi / 18, math.pi / 18, size=3)
+                obj.shape = "sphere"  # 统一形状为球体
+                obj.r = np.array([uniform_size, uniform_size, uniform_size])  # 统一大小
+                # 不添加随机旋转，保持几何体规则
 
             center_xy = rng.uniform(-0.15, 0.15, size=2)
-            base_z = float(rng.uniform(-0.3, 0.0))
+            base_z = float(rng.uniform(-0.8, -0.3))
             # 所有物体使用相同的半径，确保在同一个圆柱螺旋线上
-            radius = float(rng.uniform(0.55, 0.85) + 0.01 * attempt)
-            # 每帧旋转的角度（恒定）
-            delta_theta = float(rng.uniform(math.pi / 6, math.pi / 3))
-            # 每帧上升的高度（恒定）
-            delta_z = float(rng.uniform(0.12, 0.28))
+            radius = float(rng.uniform(0.7, 1.0) + 0.01 * attempt)  # 增大半径
+            
+            # 螺旋线参数：让物体沿着一条连续的螺旋线排列
+            # 每帧旋转的角度（恒定，大幅增大）
+            delta_theta = float(rng.uniform(math.pi / 2, math.pi * 1.2))  # 90°-216°，大幅增加
+            # 每帧上升的高度（恒定，大幅增大）
+            delta_z = float(rng.uniform(0.6, 1.0))  # 从 0.3-0.5 增加到 0.6-1.0，扩大2倍
+            
             # 初始角度
             angle0 = float(rng.uniform(0.0, 2 * math.pi))
-            # 物体之间的角度间距（恒定，确保相对间距不变）
-            angle_spacing = float(rng.uniform(math.pi / 4, math.pi / 2))
-            # 物体之间的高度间距（恒定，确保相对间距不变）
-            z_spacing = float(rng.uniform(0.08, 0.15) + 0.005 * attempt)
+            
+            # 关键：高度与角度成比例，形成真正的螺旋线
+            # z = base_z + (angle - angle0) * height_per_angle
+            # 这样物体就会沿着一条连续的螺旋线排列
+            # 大幅增大高度与角度的比例，让螺旋幅度更明显
+            height_per_angle = float(rng.uniform(0.4, 0.7))  # 从 0.15-0.25 增加到 0.4-0.7，扩大3倍
+            
+            # 物体之间的角度间距：根据几何体大小和螺旋参数计算，确保紧密排列
+            # 目标：让相邻几何体在3D空间中的实际距离接近但略大于几何体直径
+            obj_radius = uniform_size
+            obj_diameter = 2 * obj_radius
+            
+            # 计算在螺旋线上相邻几何体的3D距离
+            # 对于给定的角度间距d_angle，3D距离 = sqrt((radius*d_angle)^2 + (d_angle*height_per_angle)^2)
+            # 我们希望这个距离略大于obj_diameter，形成紧密但可见的螺旋线
+            # 简化：假设角度间距较小，使用线性近似
+            # 目标距离 = obj_diameter * 1.3 (紧密但不重叠)
+            target_distance = obj_diameter * 1.3
+            
+            # 求解角度间距：target_distance^2 = (radius*d_angle)^2 + (d_angle*height_per_angle)^2
+            # d_angle^2 * (radius^2 + height_per_angle^2) = target_distance^2
+            # d_angle = target_distance / sqrt(radius^2 + height_per_angle^2)
+            angle_spacing = target_distance / math.sqrt(radius**2 + height_per_angle**2)
+            
+            # 限制角度间距范围，确保螺旋线连续且紧密
+            angle_spacing = max(angle_spacing, math.pi / 12)  # 最小15度
+            angle_spacing = min(angle_spacing, math.pi / 3)   # 最大60度，确保紧密
 
             base_angles = []
             base_zs = []
             for i in range(count):
-                # 每个物体的初始角度，保持恒定间距
-                base_angles.append(angle0 + i * angle_spacing)
-                # 每个物体的初始高度，保持恒定间距
-                base_zs.append(base_z + i * z_spacing)
+                # 每个物体的初始角度，沿着螺旋线连续排列
+                angle = angle0 + i * angle_spacing
+                base_angles.append(angle)
+                # 高度与角度成比例，形成连续螺旋线
+                # z = base_z + (angle - angle0) * height_per_angle
+                base_zs.append(base_z + (angle - angle0) * height_per_angle)
 
             def build_frame(t: int) -> List[ObjectState]:
                 """构建第 t 帧：物体沿螺旋线旋转和上升，保持相对间距不变"""
                 arranged = clone_objects(objs)
-                for obj, ang0, z0 in zip(arranged, base_angles, base_zs):
+                for obj, ang0 in zip(arranged, base_angles):
                     # 角度 = 初始角度 + t * 每帧旋转角度（所有物体同步旋转）
                     ang = ang0 + t * delta_theta
-                    # 高度 = 初始高度 + t * 每帧上升高度（所有物体同步上升）
-                    z = z0 + t * delta_z
+                    # 高度与角度成比例，形成连续螺旋线
+                    # z = base_z + (angle - angle0) * height_per_angle + t * delta_z
+                    # 这样物体沿着螺旋线移动时，高度会随着角度连续变化
+                    z = base_z + (ang - angle0) * height_per_angle + t * delta_z
                     # 所有物体在同一个圆柱螺旋线上（相同半径）
                     obj.p = np.array(
                         [
@@ -345,9 +377,9 @@ class R3_1SpiralAscend(Rule):
                 "delta_theta": delta_theta,
                 "delta_z": delta_z,
                 "angle_spacing": angle_spacing,  # 角度间距
-                "z_spacing": z_spacing,  # 高度间距
+                "height_per_angle": height_per_angle,  # 高度与角度的比例（形成螺旋线）
                 "base_angles": base_angles,
-                "base_z": base_zs,
+                "base_z": base_z,  # 基础高度
             },
             v,
             scenes,
@@ -361,25 +393,27 @@ class R3_1SpiralAscend(Rule):
         center_xy = np.array(params.get("center_xy", [0.0, 0.0]))
         radius = float(params.get("radius", 0.7))
         delta_theta = float(params.get("delta_theta", math.pi / 4))
-        delta_z = float(params.get("delta_z", 0.2))
+        delta_z = float(params.get("delta_z", 0.3))
         angle_spacing = float(params.get("angle_spacing", math.pi / 3))
-        z_spacing = float(params.get("z_spacing", 0.1))
+        height_per_angle = float(params.get("height_per_angle", 0.2))
         base_angles = params.get("base_angles", [])
-        base_zs = params.get("base_z", [])
+        base_z = float(params.get("base_z", -0.3))
+        angle0 = base_angles[0] if base_angles else 0.0
         
-        if not base_angles or not base_zs or len(base_angles) != len(scene_c.objects):
+        if not base_angles or len(base_angles) != len(scene_c.objects):
             return [], []
         
         count = len(scene_c.objects)
         
         def build_spiral_frame(objs_in: List[ObjectState], t: int, 
-                              angle_sp: float, z_sp: float, 
+                              angle_sp: float, h_per_ang: float, 
                               d_theta: float, d_z: float) -> Scene:
-            """构建螺旋线帧"""
+            """构建螺旋线帧：高度与角度成比例"""
             arranged = clone_objects(objs_in)
             for i, obj in enumerate(arranged):
                 ang = base_angles[i] + t * d_theta
-                z = base_zs[i] + t * d_z
+                # 高度与角度成比例，形成连续螺旋线
+                z = base_z + (ang - angle0) * h_per_ang + t * d_z
                 obj.p = np.array([
                     center_xy[0] + radius * math.cos(ang),
                     center_xy[1] + radius * math.sin(ang),
@@ -394,16 +428,16 @@ class R3_1SpiralAscend(Rule):
         available_shapes = [s for s in SHAPES if s != wrong_shape_obj.shape]
         if available_shapes:
             wrong_shape[shape_idx] = switch_shape(wrong_shape_obj, str(rng.choice(available_shapes)))
-        wrong_shape_scene = build_spiral_frame(wrong_shape, 2, angle_spacing, z_spacing, delta_theta, delta_z)
+        wrong_shape_scene = build_spiral_frame(wrong_shape, 2, angle_spacing, height_per_angle, delta_theta, delta_z)
         
         # 干扰项2：尺寸错误（改变某个物体的尺寸）
         wrong_size = clone_objects(scene_c.objects)
         size_idx = int(rng.integers(0, count))
         size_factor = float(rng.uniform(0.5, 0.7) if rng.random() < 0.5 else rng.uniform(1.5, 2.0))
         wrong_size[size_idx] = apply_scale(wrong_size[size_idx], size_factor)
-        wrong_size_scene = build_spiral_frame(wrong_size, 2, angle_spacing, z_spacing, delta_theta, delta_z)
+        wrong_size_scene = build_spiral_frame(wrong_size, 2, angle_spacing, height_per_angle, delta_theta, delta_z)
         
-        # 干扰项3：旋转间距错误（角度间距不恒定）
+        # 干扰项3：旋转间距错误（角度间距不恒定，破坏螺旋线）
         wrong_angle_spacing = clone_objects(scene_c.objects)
         # 改变角度间距，让不同物体之间的角度间距不同（不恒定）
         wrong_base_angles = []
@@ -421,7 +455,8 @@ class R3_1SpiralAscend(Rule):
         arranged_wrong_angle = clone_objects(scene_c.objects)
         for i, obj in enumerate(arranged_wrong_angle):
             ang = wrong_base_angles[i] + 2 * delta_theta
-            z = base_zs[i] + 2 * delta_z
+            # 使用错误的角度计算高度，破坏螺旋线
+            z = base_z + (ang - angle0) * height_per_angle * 0.7 + 2 * delta_z  # 改变高度比例
             obj.p = np.array([
                 center_xy[0] + radius * math.cos(ang),
                 center_xy[1] + radius * math.sin(ang),
@@ -433,7 +468,7 @@ class R3_1SpiralAscend(Rule):
         reasons = [
             "物体形状不符合规则",
             "物体尺寸不符合规则",
-            "旋转间距不恒定",
+            "旋转间距不恒定，破坏螺旋线",
         ]
         return distractors, reasons
 
