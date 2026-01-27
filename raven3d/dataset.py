@@ -10,7 +10,7 @@ from .io import write_meta, write_ply, ensure_dir
 from .registry import RuleRegistry
 from .rules.base import RuleDifficulty
 from .scene import Scene
-from .rules.utils import apply_rotation, apply_scale, apply_translation, random_object
+from .rules.utils import SHAPES, apply_rotation, apply_scale, apply_translation, random_object
 
 
 @dataclass
@@ -92,7 +92,8 @@ class DatasetGenerator:
             new_scene.objects[idx].density = max(obj.density * factor, 1e-3)
             reason = f"调整密度，导致 {derived_desc} 破坏 {pattern} 模式变换"
         elif "s" in base_attrs:
-            alt_shape = random_object(self.rng).shape
+            shape_choices = [s for s in SHAPES if s != obj.shape]
+            alt_shape = str(self.rng.choice(shape_choices)) if shape_choices else obj.shape
             new_scene.objects[idx] = obj.copy()
             new_scene.objects[idx].shape = alt_shape
             reason = f"替换形状，派生 {derived_desc} 不再满足 {pattern} 模式变换"
