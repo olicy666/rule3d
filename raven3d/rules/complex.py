@@ -267,18 +267,18 @@ class R3_1SpiralAscend(Rule):
             # 允许使用各种形状的几何体
             objs = [random_object(rng) for _ in range(count)]
             # 统一大小：所有几何体使用相同的大小，形成清晰的螺旋线
-            # 使用approx_radius来计算，确保不同形状的几何体有相似的"半径"
-            uniform_approx_radius = float(rng.uniform(0.15, 0.22)) * (0.95 ** attempt)
-            # 根据approx_radius = 0.6 * ||r||，反推r的大小
-            uniform_r_norm = uniform_approx_radius / 0.6
+            # 保持原来的大小范围，确保螺旋线连接
+            uniform_size = float(rng.uniform(0.25, 0.35)) * (0.95 ** attempt)
             for obj in objs:
                 # 保持原始形状，但统一大小
-                # 保持r的方向性（对于非球体），但统一大小
+                # 统一approx_radius，确保不同形状的几何体有相同的"半径"
+                # approx_radius = 0.6 * ||r||，所以需要 ||r|| = uniform_size / 0.6
+                target_r_norm = uniform_size / 0.6
                 if np.linalg.norm(obj.r) > 1e-6:
-                    scale_factor = uniform_r_norm / np.linalg.norm(obj.r)
+                    scale_factor = target_r_norm / np.linalg.norm(obj.r)
                     obj.r = obj.r * scale_factor
                 else:
-                    obj.r = np.array([uniform_r_norm, uniform_r_norm, uniform_r_norm])
+                    obj.r = np.array([target_r_norm, target_r_norm, target_r_norm])
                 # 可以添加小幅随机旋转，增加视觉多样性
                 obj.rotation = obj.rotation + rng.uniform(-math.pi / 12, math.pi / 12, size=3)
 
@@ -305,7 +305,8 @@ class R3_1SpiralAscend(Rule):
             # 物体之间的角度间距：根据几何体大小和螺旋参数计算，确保紧密排列
             # 目标：让相邻几何体在3D空间中的实际距离接近但略大于几何体直径
             # 使用approx_radius来计算，适用于所有形状
-            obj_radius = uniform_approx_radius
+            # uniform_size就是approx_radius，因为approx_radius = 0.6 * ||r||，而||r|| = uniform_size / 0.6
+            obj_radius = uniform_size  # 这就是approx_radius
             obj_diameter = 2 * obj_radius
             
             # 计算在螺旋线上相邻几何体的3D距离
