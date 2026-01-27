@@ -239,6 +239,107 @@ class R2_6RelativeOrientationInvariant(Rule):
 
 
 @dataclass
+class R3_1SpiralAscend(Rule):
+    def __init__(self) -> None:
+        super().__init__("R3-1", RuleDifficulty.COMPLEX, "螺旋上升", "多对象螺旋上升等差高度")
+
+    def sample_params(self, rng) -> Dict:
+        count = int(rng.integers(3, 7))
+        return {"count": count}
+
+    def generate_triplet(self, params, rng):
+        count = int(params["count"])
+        involved = list(range(count))
+
+        a_objs: List[ObjectState] = []
+        b_objs: List[ObjectState] = []
+        c_objs: List[ObjectState] = []
+        center_xy = np.zeros(2)
+        base_angles: List[float] = []
+        radii: List[float] = []
+        base_zs: List[float] = []
+        delta_theta = 0.0
+        delta_z = 0.0
+
+        for attempt in range(60):
+            objs = [random_object(rng) for _ in range(count)]
+            size_scale = float(rng.uniform(0.45, 0.65)) * (0.95 ** attempt)
+            for obj in objs:
+                obj.r = obj.r * size_scale
+                obj.rotation = obj.rotation + rng.uniform(-math.pi / 18, math.pi / 18, size=3)
+
+            center_xy = rng.uniform(-0.15, 0.15, size=2)
+            base_z = float(rng.uniform(-0.3, 0.0))
+            radius_base = float(rng.uniform(0.55, 0.85) + 0.01 * attempt)
+            radius_jitter = float(rng.uniform(0.0, 0.08))
+            delta_theta = float(rng.uniform(math.pi / 6, math.pi / 3))
+            delta_z = float(rng.uniform(0.12, 0.28))
+            angle0 = float(rng.uniform(0.0, 2 * math.pi))
+            z_gap = float(rng.uniform(0.04, 0.1) + 0.005 * attempt)
+
+            base_angles = []
+            radii = []
+            base_zs = []
+            for i in range(count):
+                base_angles.append(angle0 + 2 * math.pi * i / count)
+                radii.append(max(0.25, radius_base + rng.uniform(-radius_jitter, radius_jitter)))
+                base_zs.append(base_z + (i - (count - 1) / 2) * z_gap)
+
+            def build_frame(t: int) -> List[ObjectState]:
+                arranged = clone_objects(objs)
+                for obj, ang0, rad, z0 in zip(arranged, base_angles, radii, base_zs):
+                    ang = ang0 + t * delta_theta
+                    obj.p = np.array(
+                        [
+                            center_xy[0] + rad * math.cos(ang),
+                            center_xy[1] + rad * math.sin(ang),
+                            z0 + t * delta_z,
+                        ]
+                    )
+                return arranged
+
+            a_objs = build_frame(0)
+            b_objs = build_frame(1)
+            c_objs = build_frame(2)
+
+            if _all_non_contact(a_objs) and _all_non_contact(b_objs) and _all_non_contact(c_objs):
+                break
+        else:
+            for _ in range(6):
+                if _all_non_contact(a_objs) and _all_non_contact(b_objs) and _all_non_contact(c_objs):
+                    break
+                for obj in objs:
+                    obj.r = obj.r * 0.85
+                a_objs = build_frame(0)
+                b_objs = build_frame(1)
+                c_objs = build_frame(2)
+
+        scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
+        v = [[float(o.p[2]) for o in s.objects] for s in scenes]
+        meta = build_rule_meta(
+            self,
+            "R3",
+            3,
+            involved,
+            ["p"],
+            ["spiral_up"],
+            "helical-arithmetic",
+            {
+                "count": count,
+                "center_xy": center_xy.tolist(),
+                "delta_theta": delta_theta,
+                "delta_z": delta_z,
+                "radius": radii,
+                "base_angles": base_angles,
+                "base_z": base_zs,
+            },
+            v,
+            scenes,
+        )
+        return scenes[0], scenes[1], scenes[2], meta
+
+
+@dataclass
 class R3_7PositionCycle(Rule):
     def __init__(self) -> None:
         super().__init__("R3-7", RuleDifficulty.COMPLEX, "多对象位置轮换", "球体沿结构按步长轮换")
@@ -2411,6 +2512,7 @@ def build_complex_rules() -> List[Rule]:
     return [
         R1_9ScaleRotateCoupled(),
         R2_6RelativeOrientationInvariant(),
+        R3_1SpiralAscend(),
         R3_7PositionCycle(),
         R3_8DensityShift(),
         R3_9ScaleShift(),
