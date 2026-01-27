@@ -920,7 +920,7 @@ class R3_9ScaleShift(Rule):
         super().__init__("R3-9", RuleDifficulty.COMPLEX, "多对象尺度变化", "多对象尺度按位置延续增减")
 
     def sample_params(self, rng) -> Dict:
-        count = int(rng.integers(3, 7))
+        count = int(rng.integers(3, 6))
         return {"count": count}
 
     @staticmethod
@@ -1142,7 +1142,7 @@ class R3_11SinePositionShift(Rule):
 
     @staticmethod
     def _sine_positions() -> tuple[List[np.ndarray], List[int]]:
-        angles_deg = [0, 45, 90, 135, 180, 225, 270, 315]
+        angles_deg = list(range(0, 360, 20))
         x_vals = np.linspace(-0.8, 0.8, len(angles_deg))
         positions = []
         for idx, deg in enumerate(angles_deg):
@@ -1159,18 +1159,20 @@ class R3_11SinePositionShift(Rule):
         n = len(positions)
         count = int(params.get("count", 3))
         step = 1 if rng.random() < 0.5 else -1
+        span = 3 * count - 2
         if step == 1:
-            # Need room for start + (count - 1) + 2*step within [0, n-1]
-            max_start = n - count - 2
+            # Need room for chained windows A->B->C with overlap on endpoints.
+            max_start = n - span
             start = int(rng.integers(0, max_start + 1))
         else:
-            min_start = 2
-            max_start = n - count
+            min_start = span - 1
+            max_start = n - 1
             start = int(rng.integers(min_start, max_start + 1))
 
-        idx_a = [start + i for i in range(count)]
-        idx_b = [start + i + step for i in range(count)]
-        idx_c = [start + i + 2 * step for i in range(count)]
+        full_indices = [start + i * step for i in range(span)]
+        idx_a = full_indices[0:count]
+        idx_b = full_indices[count - 1 : 2 * count - 1]
+        idx_c = full_indices[2 * count - 2 : 3 * count - 2]
 
         objs = init_objects(rng, count, m=count)
         for obj in objs:
@@ -1208,6 +1210,7 @@ class R3_11SinePositionShift(Rule):
         positions, _angles = self._sine_positions()
         params = meta.get("pattern_params", {})
         step = int(params.get("step", 1))
+        count = int(params.get("count", len(scene_c.objects)))
         v = meta.get("v", {})
         idx_a = v.get("v1")
         idx_b = v.get("v2")
@@ -1221,14 +1224,18 @@ class R3_11SinePositionShift(Rule):
                 obj.p = positions[int(idx)]
             return scene_from_objects(objs)
 
-        gap_indices = []
-        for i in idx_c:
-            cand = int(i) + 2 * step
-            if 0 <= cand < len(positions):
-                gap_indices.append(cand)
-            else:
-                alt = int(i) - 2 * step
-                gap_indices.append(alt if 0 <= alt < len(positions) else int(i))
+        def shift_indices(indices: List[int], delta: int) -> List[int]:
+            shifted = []
+            for i in indices:
+                cand = int(i) + delta
+                if 0 <= cand < len(positions):
+                    shifted.append(cand)
+                else:
+                    alt = int(i) - delta
+                    shifted.append(alt if 0 <= alt < len(positions) else int(i))
+            return shifted
+
+        gap_indices = shift_indices(idx_c, step)
 
         candidates = [idx_b, idx_a, gap_indices]
         distractors = [build_from(pair) for pair in candidates]
