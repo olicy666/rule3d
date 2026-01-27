@@ -794,14 +794,14 @@ class R3_4DensityCycleConsume(Rule):
             return positions, layout_name
 
         def eater_positions(cur_order: List[int]) -> List[int]:
-            if len(cur_order) < 3:
+            if len(cur_order) < 2:
                 return []
             positions = []
             for i in range(len(cur_order)):
                 left = (i - 1) % len(cur_order)
                 right = (i + 1) % len(cur_order)
                 cur_val = density_map[cur_order[i]]
-                if cur_val > density_map[cur_order[left]] and cur_val > density_map[cur_order[right]]:
+                if cur_val > density_map[cur_order[left]] or cur_val > density_map[cur_order[right]]:
                     positions.append(i)
             return positions
 
@@ -925,7 +925,7 @@ class R3_4DensityCycleConsume(Rule):
             return scene_from_objects(arranged)
 
         def eater_positions(cur_objs: List[ObjectState], use_smallest: bool = False) -> List[int]:
-            if len(cur_objs) < 3:
+            if len(cur_objs) < 2:
                 return []
             values = [density(o) for o in cur_objs]
             positions = []
@@ -933,10 +933,10 @@ class R3_4DensityCycleConsume(Rule):
                 left = (i - 1) % len(cur_objs)
                 right = (i + 1) % len(cur_objs)
                 if use_smallest:
-                    if values[i] < values[left] and values[i] < values[right]:
+                    if values[i] < values[left] or values[i] < values[right]:
                         positions.append(i)
                 else:
-                    if values[i] > values[left] and values[i] > values[right]:
+                    if values[i] > values[left] or values[i] > values[right]:
                         positions.append(i)
             return positions
 
@@ -1062,14 +1062,14 @@ class R3_5CycleConsume(Rule):
             return positions, layout_name
 
         def eater_positions(cur_order: List[int]) -> List[int]:
-            if len(cur_order) < 3:
+            if len(cur_order) < 2:
                 return []
             positions = []
             for i in range(len(cur_order)):
                 left = (i - 1) % len(cur_order)
                 right = (i + 1) % len(cur_order)
                 cur_val = size_map[cur_order[i]]
-                if cur_val > size_map[cur_order[left]] and cur_val > size_map[cur_order[right]]:
+                if cur_val > size_map[cur_order[left]] or cur_val > size_map[cur_order[right]]:
                     positions.append(i)
             return positions
 
@@ -1192,7 +1192,7 @@ class R3_5CycleConsume(Rule):
             return scene_from_objects(arranged)
 
         def eater_positions(cur_objs: List[ObjectState], use_smallest: bool = False) -> List[int]:
-            if len(cur_objs) < 3:
+            if len(cur_objs) < 2:
                 return []
             values = [size(o) for o in cur_objs]
             positions = []
@@ -1200,10 +1200,10 @@ class R3_5CycleConsume(Rule):
                 left = (i - 1) % len(cur_objs)
                 right = (i + 1) % len(cur_objs)
                 if use_smallest:
-                    if values[i] < values[left] and values[i] < values[right]:
+                    if values[i] < values[left] or values[i] < values[right]:
                         positions.append(i)
                 else:
-                    if values[i] > values[left] and values[i] > values[right]:
+                    if values[i] > values[left] or values[i] > values[right]:
                         positions.append(i)
             return positions
 
