@@ -256,44 +256,58 @@ class R3_1SpiralAscend(Rule):
         c_objs: List[ObjectState] = []
         center_xy = np.zeros(2)
         base_angles: List[float] = []
-        radii: List[float] = []
+        radius = 0.0  # 所有物体使用相同的半径，在同一个圆柱螺旋线上
         base_zs: List[float] = []
         delta_theta = 0.0
         delta_z = 0.0
+        angle_spacing = 0.0  # 物体之间的角度间距（恒定）
+        z_spacing = 0.0  # 物体之间的高度间距（恒定）
 
         for attempt in range(60):
             objs = [random_object(rng) for _ in range(count)]
             size_scale = float(rng.uniform(0.45, 0.65)) * (0.95 ** attempt)
             for obj in objs:
                 obj.r = obj.r * size_scale
+                # 物体可以有不同的初始旋转，但位置遵循螺旋线
                 obj.rotation = obj.rotation + rng.uniform(-math.pi / 18, math.pi / 18, size=3)
 
             center_xy = rng.uniform(-0.15, 0.15, size=2)
             base_z = float(rng.uniform(-0.3, 0.0))
-            radius_base = float(rng.uniform(0.55, 0.85) + 0.01 * attempt)
-            radius_jitter = float(rng.uniform(0.0, 0.08))
+            # 所有物体使用相同的半径，确保在同一个圆柱螺旋线上
+            radius = float(rng.uniform(0.55, 0.85) + 0.01 * attempt)
+            # 每帧旋转的角度（恒定）
             delta_theta = float(rng.uniform(math.pi / 6, math.pi / 3))
+            # 每帧上升的高度（恒定）
             delta_z = float(rng.uniform(0.12, 0.28))
+            # 初始角度
             angle0 = float(rng.uniform(0.0, 2 * math.pi))
-            z_gap = float(rng.uniform(0.04, 0.1) + 0.005 * attempt)
+            # 物体之间的角度间距（恒定，确保相对间距不变）
+            angle_spacing = float(rng.uniform(math.pi / 4, math.pi / 2))
+            # 物体之间的高度间距（恒定，确保相对间距不变）
+            z_spacing = float(rng.uniform(0.08, 0.15) + 0.005 * attempt)
 
             base_angles = []
-            radii = []
             base_zs = []
             for i in range(count):
-                base_angles.append(angle0 + 2 * math.pi * i / count)
-                radii.append(max(0.25, radius_base + rng.uniform(-radius_jitter, radius_jitter)))
-                base_zs.append(base_z + (i - (count - 1) / 2) * z_gap)
+                # 每个物体的初始角度，保持恒定间距
+                base_angles.append(angle0 + i * angle_spacing)
+                # 每个物体的初始高度，保持恒定间距
+                base_zs.append(base_z + i * z_spacing)
 
             def build_frame(t: int) -> List[ObjectState]:
+                """构建第 t 帧：物体沿螺旋线旋转和上升，保持相对间距不变"""
                 arranged = clone_objects(objs)
-                for obj, ang0, rad, z0 in zip(arranged, base_angles, radii, base_zs):
+                for obj, ang0, z0 in zip(arranged, base_angles, base_zs):
+                    # 角度 = 初始角度 + t * 每帧旋转角度（所有物体同步旋转）
                     ang = ang0 + t * delta_theta
+                    # 高度 = 初始高度 + t * 每帧上升高度（所有物体同步上升）
+                    z = z0 + t * delta_z
+                    # 所有物体在同一个圆柱螺旋线上（相同半径）
                     obj.p = np.array(
                         [
-                            center_xy[0] + rad * math.cos(ang),
-                            center_xy[1] + rad * math.sin(ang),
-                            z0 + t * delta_z,
+                            center_xy[0] + radius * math.cos(ang),
+                            center_xy[1] + radius * math.sin(ang),
+                            z,
                         ]
                     )
                 return arranged
@@ -327,9 +341,11 @@ class R3_1SpiralAscend(Rule):
             {
                 "count": count,
                 "center_xy": center_xy.tolist(),
+                "radius": radius,  # 单一半径值
                 "delta_theta": delta_theta,
                 "delta_z": delta_z,
-                "radius": radii,
+                "angle_spacing": angle_spacing,  # 角度间距
+                "z_spacing": z_spacing,  # 高度间距
                 "base_angles": base_angles,
                 "base_z": base_zs,
             },
@@ -337,6 +353,194 @@ class R3_1SpiralAscend(Rule):
             scenes,
         )
         return scenes[0], scenes[1], scenes[2], meta
+
+    def make_distractors(self, scene_c: Scene, rng, meta: Dict) -> Tuple[list[Scene], list[str]]:
+        if len(scene_c.objects) < 3:
+            return [], []
+        params = meta.get("pattern_params", {})
+        center_xy = np.array(params.get("center_xy", [0.0, 0.0]))
+        radius = float(params.get("radius", 0.7))
+        delta_theta = float(params.get("delta_theta", math.pi / 4))
+        delta_z = float(params.get("delta_z", 0.2))
+        angle_spacing = float(params.get("angle_spacing", math.pi / 3))
+        z_spacing = float(params.get("z_spacing", 0.1))
+        base_angles = params.get("base_angles", [])
+        base_zs = params.get("base_z", [])
+        
+        if not base_angles or not base_zs or len(base_angles) != len(scene_c.objects):
+            return [], []
+        
+        count = len(scene_c.objects)
+        
+        def build_spiral_frame(objs_in: List[ObjectState], t: int, 
+                              angle_sp: float, z_sp: float, 
+                              d_theta: float, d_z: float) -> Scene:
+            """构建螺旋线帧"""
+            arranged = clone_objects(objs_in)
+            for i, obj in enumerate(arranged):
+                ang = base_angles[i] + t * d_theta
+                z = base_zs[i] + t * d_z
+                obj.p = np.array([
+                    center_xy[0] + radius * math.cos(ang),
+                    center_xy[1] + radius * math.sin(ang),
+                    z,
+                ])
+            return scene_from_objects(arranged)
+        
+        # 干扰项1：形状错误（改变某个物体的形状）
+        wrong_shape = clone_objects(scene_c.objects)
+        shape_idx = int(rng.integers(0, count))
+        wrong_shape_obj = wrong_shape[shape_idx]
+        available_shapes = [s for s in SHAPES if s != wrong_shape_obj.shape]
+        if available_shapes:
+            wrong_shape[shape_idx] = switch_shape(wrong_shape_obj, str(rng.choice(available_shapes)))
+        wrong_shape_scene = build_spiral_frame(wrong_shape, 2, angle_spacing, z_spacing, delta_theta, delta_z)
+        
+        # 干扰项2：尺寸错误（改变某个物体的尺寸）
+        wrong_size = clone_objects(scene_c.objects)
+        size_idx = int(rng.integers(0, count))
+        size_factor = float(rng.uniform(0.5, 0.7) if rng.random() < 0.5 else rng.uniform(1.5, 2.0))
+        wrong_size[size_idx] = apply_scale(wrong_size[size_idx], size_factor)
+        wrong_size_scene = build_spiral_frame(wrong_size, 2, angle_spacing, z_spacing, delta_theta, delta_z)
+        
+        # 干扰项3：旋转间距错误（角度间距不恒定）
+        wrong_angle_spacing = clone_objects(scene_c.objects)
+        # 改变角度间距，让不同物体之间的角度间距不同（不恒定）
+        wrong_base_angles = []
+        wrong_angle_sp = angle_spacing * float(rng.uniform(0.7, 0.9))  # 稍微改变间距
+        for i in range(count):
+            if i == 0:
+                wrong_base_angles.append(base_angles[0])
+            else:
+                # 让某些间距变大，某些变小，破坏恒定间距
+                if i % 2 == 0:
+                    wrong_base_angles.append(wrong_base_angles[-1] + wrong_angle_sp * 1.3)
+                else:
+                    wrong_base_angles.append(wrong_base_angles[-1] + wrong_angle_sp * 0.7)
+        
+        arranged_wrong_angle = clone_objects(scene_c.objects)
+        for i, obj in enumerate(arranged_wrong_angle):
+            ang = wrong_base_angles[i] + 2 * delta_theta
+            z = base_zs[i] + 2 * delta_z
+            obj.p = np.array([
+                center_xy[0] + radius * math.cos(ang),
+                center_xy[1] + radius * math.sin(ang),
+                z,
+            ])
+        wrong_angle_scene = scene_from_objects(arranged_wrong_angle)
+        
+        distractors = [wrong_shape_scene, wrong_size_scene, wrong_angle_scene]
+        reasons = [
+            "物体形状不符合规则",
+            "物体尺寸不符合规则",
+            "旋转间距不恒定",
+        ]
+        return distractors, reasons
+
+
+@dataclass
+class R3_3LineRotate(Rule):
+    def __init__(self) -> None:
+        super().__init__("R3-3", RuleDifficulty.COMPLEX, "直线阵型旋转", "直线阵列整体等角度旋转")
+
+    def sample_params(self, rng) -> Dict:
+        return {}
+
+    def generate_triplet(self, params, rng):
+        count = 6
+        involved = list(range(count))
+
+        a_objs: List[ObjectState] = []
+        center = np.zeros(3)
+        line_dir = np.array([1.0, 0.0, 0.0])
+        theta = 0.0
+        step = 0.0
+
+        for attempt in range(40):
+            objs = [random_object(rng) for _ in range(count)]
+            size_scale = float(rng.uniform(0.45, 0.7)) * (0.95 ** attempt)
+            for obj in objs:
+                obj.r = obj.r * size_scale
+
+            line_dir = _unit_vector(rng)
+            line_dir[2] = float(rng.uniform(-0.25, 0.25))
+            line_dir = line_dir / (np.linalg.norm(line_dir) + 1e-9)
+            center = rng.uniform(-0.15, 0.15, size=3)
+            theta = float(rng.uniform(math.pi / 10, math.pi / 3))
+
+            max_radius = max(approx_radius(obj) for obj in objs)
+            step = max(0.25, max_radius * rng.uniform(2.4, 2.9))
+            offsets = [(i - (count - 1) / 2) * step for i in range(count)]
+            for obj, offset in zip(objs, offsets):
+                obj.p = center + line_dir * offset
+
+            if _all_non_contact(objs):
+                a_objs = clone_objects(objs)
+                break
+        else:
+            a_objs = clone_objects(objs)
+
+        rot_b = rotation_matrix(np.array([0.0, 0.0, theta]))
+        rot_c = rotation_matrix(np.array([0.0, 0.0, 2 * theta]))
+
+        def rotate_positions(src: Sequence[ObjectState], rot_m: np.ndarray) -> List[ObjectState]:
+            arranged = clone_objects(src)
+            for obj in arranged:
+                offset = obj.p - center
+                obj.p = center + rot_m @ offset
+            return arranged
+
+        b_objs = rotate_positions(a_objs, rot_b)
+        c_objs = rotate_positions(a_objs, rot_c)
+
+        scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
+        dir_a = line_dir
+        dir_b = rot_b @ line_dir
+        dir_c = rot_c @ line_dir
+        v = [dir_a.tolist(), dir_b.tolist(), dir_c.tolist()]
+        meta = build_rule_meta(
+            self,
+            "R3",
+            count,
+            involved,
+            ["p"],
+            ["line_dir"],
+            "rigid-rotation",
+            {"count": count, "center": center.tolist(), "theta": theta, "step": step, "line_dir": line_dir.tolist()},
+            v,
+            scenes,
+        )
+        return scenes[0], scenes[1], scenes[2], meta
+
+    def make_distractors(self, scene_c: Scene, rng, meta: Dict) -> Tuple[list[Scene], list[str]]:
+        if not scene_c.objects:
+            return [], []
+        params = meta.get("pattern_params", {})
+        theta = float(params.get("theta", math.pi / 6))
+        center = np.array(params.get("center", centroid(scene_c.objects)), dtype=float)
+
+        def rotate_positions(angle: float) -> Scene:
+            arranged = clone_objects(scene_c.objects)
+            rot = rotation_matrix(np.array([0.0, 0.0, angle]))
+            for obj in arranged:
+                offset = obj.p - center
+                obj.p = center + rot @ offset
+            return scene_from_objects(arranged)
+
+        wrong_angle = rotate_positions(-theta)
+
+        wrong_orientation_objs = clone_objects(scene_c.objects)
+        for idx, obj in enumerate(wrong_orientation_objs):
+            wrong_orientation_objs[idx] = apply_rotation(obj, np.array([0.0, 0.0, theta]))
+        wrong_orientation = scene_from_objects(wrong_orientation_objs)
+
+        scale_factor = float(rng.uniform(1.25, 1.45))
+        wrong_scale_objs = [apply_scale(obj, scale_factor) for obj in scene_c.objects]
+        wrong_scale = scene_from_objects(wrong_scale_objs)
+
+        distractors = [wrong_angle, wrong_orientation, wrong_scale]
+        reasons = ["旋转角度错误，方向或幅度不一致", "只旋转几何体姿态，位置未保持直线旋转", "几何体尺寸发生改变"]
+        return distractors, reasons
 
 
 @dataclass
@@ -2513,6 +2717,7 @@ def build_complex_rules() -> List[Rule]:
         R1_9ScaleRotateCoupled(),
         R2_6RelativeOrientationInvariant(),
         R3_1SpiralAscend(),
+        R3_3LineRotate(),
         R3_7PositionCycle(),
         R3_8DensityShift(),
         R3_9ScaleShift(),
