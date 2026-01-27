@@ -592,6 +592,139 @@ class R3_3LineRotate(Rule):
 
 
 @dataclass
+class R3_6OrientationShift(Rule):
+    def __init__(self) -> None:
+        super().__init__("R3-6", RuleDifficulty.COMPLEX, "多对象姿态变化", "多对象姿态按位置延续转换")
+
+    def sample_params(self, rng) -> Dict:
+        count = int(rng.integers(3, 7))
+        return {"count": count}
+
+    @staticmethod
+    def _regular_polygon(count: int, radius: float) -> List[np.ndarray]:
+        angles = [math.pi / 2 - i * 2 * math.pi / count for i in range(count)]
+        return [np.array([radius * math.cos(a), radius * math.sin(a), 0.0]) for a in angles]
+
+    def _layout_positions(self, count: int) -> tuple[List[np.ndarray], str]:
+        if count == 3:
+            return self._regular_polygon(3, 0.65), "triangle"
+        if count == 4:
+            return [
+                np.array([-0.7, -0.45, 0.0]),
+                np.array([0.7, -0.45, 0.0]),
+                np.array([0.7, 0.45, 0.0]),
+                np.array([-0.7, 0.45, 0.0]),
+            ], "rectangle"
+        if count == 5:
+            return self._regular_polygon(5, 0.7), "pentagon"
+        if count == 6:
+            return self._regular_polygon(6, 0.75), "hexagon"
+        raise ValueError(f"Unsupported object count {count}")
+
+    @staticmethod
+    def _orientation_levels(count: int) -> List[List[float]]:
+        base = np.linspace(0.0, 3.0, count).tolist()
+        return [[t, 0.5 * t, 0.25 * t] for t in base]
+
+    def generate_triplet(self, params, rng):
+        count = int(params["count"])
+        positions, layout_name = self._layout_positions(count)
+        objs = [random_object(rng, shape="triangular_prism") for _ in range(count)]
+        involved = list(range(count))
+        levels = self._orientation_levels(count)
+        level_indices = list(range(count))
+        rng.shuffle(level_indices)
+
+        for obj, pos, level_idx in zip(objs, positions, level_indices):
+            obj.p = pos
+            obj.rotation = np.array(levels[level_idx], dtype=float)
+            obj.r = np.array([0.9, 0.9, 0.9], dtype=float)
+
+        perm = rng.permutation(count).tolist()
+        if all(i == p for i, p in enumerate(perm)):
+            perm[0], perm[1] = perm[1], perm[0]
+
+        def apply_map(indices: List[int], mapping: List[int]) -> List[int]:
+            return [mapping[idx] for idx in indices]
+
+        a_indices = level_indices
+        b_indices = apply_map(a_indices, perm)
+        c_indices = apply_map(b_indices, perm)
+
+        def build_with(indices: List[int]) -> List:
+            arranged = clone_objects(objs)
+            for obj, idx in zip(arranged, indices):
+                obj.rotation = np.array(levels[idx], dtype=float)
+            return arranged
+
+        a_objs = build_with(a_indices)
+        b_objs = build_with(b_indices)
+        c_objs = build_with(c_indices)
+
+        scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
+        v = [[float(np.linalg.norm(obj.rotation)) for obj in s.objects] for s in scenes]
+        meta = build_rule_meta(
+            self,
+            "R3",
+            3,
+            involved,
+            ["R"],
+            ["axis(Oi)"],
+            "orientation-map",
+            {
+                "count": count,
+                "layout": layout_name,
+                "levels": levels,
+                "perm": perm,
+                "a_indices": a_indices,
+                "b_indices": b_indices,
+                "c_indices": c_indices,
+            },
+            v,
+            scenes,
+        )
+        return scenes[0], scenes[1], scenes[2], meta
+
+    def make_distractors(self, scene_c: Scene, rng, meta: Dict) -> Tuple[list[Scene], list[str]]:
+        if not scene_c.objects:
+            return [], []
+        params = meta.get("pattern_params", {})
+        levels = params.get("levels")
+        perm = params.get("perm")
+        b_indices = params.get("b_indices")
+        if not (levels and perm and b_indices):
+            return [], []
+        if len(b_indices) != len(scene_c.objects):
+            return [], []
+
+        def apply_map(indices: List[int], mapping: List[int]) -> List[int]:
+            return [mapping[idx] for idx in indices]
+
+        def build_with(indices: List[int]) -> Scene:
+            objs = clone_objects(scene_c.objects)
+            for i, level_idx in enumerate(indices):
+                obj = objs[i].copy()
+                obj.rotation = np.array(levels[level_idx], dtype=float)
+                objs[i] = obj
+            return scene_from_objects(objs)
+
+        inv_perm = [0] * len(perm)
+        for i, p in enumerate(perm):
+            inv_perm[p] = i
+
+        no_change = b_indices
+        reverse = apply_map(b_indices, inv_perm)
+        over = apply_map(apply_map(b_indices, perm), perm)
+        distractors = [build_with(x) for x in [no_change, reverse, over]]
+        reasons = [
+            "姿态未继续变化，停留在上一帧",
+            "姿态变化方向反向",
+            "姿态变化跨度过大",
+        ]
+        return distractors, reasons
+
+
+@dataclass
 class R3_7PositionCycle(Rule):
     def __init__(self) -> None:
         super().__init__("R3-7", RuleDifficulty.COMPLEX, "多对象位置轮换", "球体沿结构按步长轮换")
@@ -1062,7 +1195,7 @@ class R3_10ShapeShift(Rule):
         super().__init__("R3-10", RuleDifficulty.COMPLEX, "多对象形状变化", "多对象形状按位置延续转换")
 
     def sample_params(self, rng) -> Dict:
-        count = int(rng.integers(2, 6))
+        count = int(rng.integers(3, 7))
         return {"count": count}
 
     @staticmethod
@@ -2811,6 +2944,7 @@ def build_complex_rules() -> List[Rule]:
         R2_6RelativeOrientationInvariant(),
         R3_1SpiralAscend(),
         R3_3LineRotate(),
+        R3_6OrientationShift(),
         R3_7PositionCycle(),
         R3_8DensityShift(),
         R3_9ScaleShift(),
