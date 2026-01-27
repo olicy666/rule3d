@@ -444,7 +444,8 @@ class R3_1SpiralAscend(Rule):
         # 干扰项2：尺寸错误（改变某个物体的尺寸）
         wrong_size = clone_objects(scene_c.objects)
         size_idx = int(rng.integers(0, count))
-        size_factor = float(rng.uniform(0.5, 0.7) if rng.random() < 0.5 else rng.uniform(1.5, 2.0))
+        # 增大尺寸差距：缩小到30%-50%，放大到250%-350%
+        size_factor = float(rng.uniform(0.3, 0.5) if rng.random() < 0.5 else rng.uniform(2.5, 3.5))
         wrong_size[size_idx] = apply_scale(wrong_size[size_idx], size_factor)
         wrong_size_scene = build_spiral_frame(wrong_size, 2, angle_spacing, height_per_angle, delta_theta, delta_z)
         
@@ -580,7 +581,8 @@ class R3_3LineRotate(Rule):
             wrong_orientation_objs[idx] = apply_rotation(obj, np.array([0.0, 0.0, theta]))
         wrong_orientation = scene_from_objects(wrong_orientation_objs)
 
-        scale_factor = float(rng.uniform(1.25, 1.45))
+        # 增大尺寸差距：放大到250%-350%
+        scale_factor = float(rng.uniform(2.5, 3.5))
         wrong_scale_objs = [apply_scale(obj, scale_factor) for obj in scene_c.objects]
         wrong_scale = scene_from_objects(wrong_scale_objs)
 
@@ -1056,8 +1058,8 @@ class R3_10ShapeShift(Rule):
         raise ValueError(f"Unsupported object count {count}")
 
     @staticmethod
-    def _derangement_mapping(rng) -> Dict[str, str]:
-        shapes = list(SHAPES)
+    def _derangement_mapping(rng, shapes: List[str]) -> Dict[str, str]:
+        # Derangement over the observed shapes so the rule is inferable from ref1->ref2.
         while True:
             perm = rng.permutation(shapes)
             if all(a != b for a, b in zip(shapes, perm.tolist())):
@@ -1066,8 +1068,8 @@ class R3_10ShapeShift(Rule):
     def generate_triplet(self, params, rng):
         count = int(params["count"])
         positions, layout_name = self._layout_positions(count)
-        shape_map = self._derangement_mapping(rng)
         a_shapes = rng.choice(SHAPES, size=count, replace=False).tolist()
+        shape_map = self._derangement_mapping(rng, a_shapes)
         b_shapes = [shape_map[s] for s in a_shapes]
         c_shapes = [shape_map[s] for s in b_shapes]
         objs = [random_object(rng, shape=shape) for shape in a_shapes]
@@ -1127,9 +1129,8 @@ class R3_11SinePositionShift(Rule):
         n = len(positions)
         step = 1 if rng.random() < 0.5 else -1
         if step == 1:
-            start = int(rng.integers(0, n - 2))
-            if start > n - 3:
-                start = n - 3
+            # Need room for start + 1 + 2*step within [0, n-1]
+            start = int(rng.integers(0, n - 3))
         else:
             start = int(rng.integers(2, n - 1))
             if start < 2:
@@ -1967,7 +1968,8 @@ class R4_5ContactInfection(Rule):
 
         wrong_size = clone_objects(objs)
         idx_size = int(rng.integers(0, len(wrong_size)))
-        scale = float(rng.uniform(0.5, 0.7) if rng.random() < 0.5 else rng.uniform(1.5, 1.9))
+        # 增大尺寸差距：缩小到30%-50%，放大到250%-350%
+        scale = float(rng.uniform(0.3, 0.5) if rng.random() < 0.5 else rng.uniform(2.5, 3.5))
         wrong_size[idx_size] = apply_scale(wrong_size[idx_size], scale)
         _separate_objects_no_contact(wrong_size, rng, gap=0.25)  # 增大间距
 
@@ -2437,7 +2439,8 @@ class R4_8DampedBounce(Rule):
                 wrong_shape_size[idx] = switch_shape(wrong_shape_size[idx], str(rng.choice(shape_choices)))
             shape_size_reason = "形状变化破坏规则"
         else:
-            size_factor = float(rng.uniform(0.4, 0.6) if rng.random() < 0.5 else rng.uniform(1.7, 2.2))
+            # 增大尺寸差距：缩小到30%-50%，放大到250%-350%
+            size_factor = float(rng.uniform(0.3, 0.5) if rng.random() < 0.5 else rng.uniform(2.5, 3.5))
             wrong_shape_size[idx] = apply_scale(wrong_shape_size[idx], size_factor)
             shape_size_reason = "尺寸变化破坏规则"
 
