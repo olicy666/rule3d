@@ -27,6 +27,7 @@ from .utils import (
     build_rule_meta,
     centroid,
     clone_objects,
+    density,
     direction,
     dist,
     init_objects,
@@ -727,9 +728,262 @@ class R3_6OrientationShift(Rule):
 
 
 @dataclass
+class R3_4DensityCycleConsume(Rule):
+    def __init__(self) -> None:
+        super().__init__("R3-4", RuleDifficulty.COMPLEX, "密度循环吞噬", "多对象按顺/逆时针吞噬相邻对象（按密度）")
+
+    def sample_params(self, rng) -> Dict:
+        direction = "cw" if rng.random() < 0.5 else "ccw"
+        return {"direction": direction}
+
+    @staticmethod
+    def _regular_polygon(count: int, radius: float) -> List[np.ndarray]:
+        angles = [math.pi / 2 - i * 2 * math.pi / count for i in range(count)]
+        return [np.array([radius * math.cos(a), radius * math.sin(a), 0.0]) for a in angles]
+
+    def _layout_positions(self, count: int) -> tuple[List[np.ndarray], str]:
+        if count == 1:
+            return [np.array([0.0, 0.0, 0.0])], "single"
+        if count == 2:
+            return [np.array([-0.6, 0.0, 0.0]), np.array([0.6, 0.0, 0.0])], "line"
+        if count == 3:
+            return self._regular_polygon(3, 0.65), "triangle"
+        if count == 4:
+            return [
+                np.array([-0.7, -0.45, 0.0]),
+                np.array([0.7, -0.45, 0.0]),
+                np.array([0.7, 0.45, 0.0]),
+                np.array([-0.7, 0.45, 0.0]),
+            ], "rectangle"
+        if count == 5:
+            return self._regular_polygon(5, 0.7), "pentagon"
+        if count == 6:
+            return self._regular_polygon(6, 0.75), "hexagon"
+        raise ValueError(f"Unsupported object count {count}")
+
+    @staticmethod
+    def _size_levels() -> List[float]:
+        return [0.6, 0.8, 1.0, 1.2, 1.4, 1.8]
+
+    @staticmethod
+    def _density_levels() -> List[float]:
+        return [0.6, 0.8, 1.0, 1.2, 1.4, 1.8]
+
+    def generate_triplet(self, params, rng):
+        direction = params.get("direction", "cw")
+        base_shape = str(rng.choice(SHAPES))
+        objs = [random_object(rng, shape=base_shape) for _ in range(6)]
+
+        size_val = float(rng.choice(self._size_levels()))
+        density_levels = self._density_levels()
+        rng.shuffle(density_levels)
+        density_map = {idx: density_levels[idx] for idx in range(6)}
+
+        for obj_idx, obj in enumerate(objs):
+            obj.r = np.array([size_val, size_val, size_val], dtype=float)
+            obj.density = float(density_map[obj_idx])
+            obj.rotation = obj.rotation + rng.uniform(-math.pi / 18, math.pi / 18, size=3)
+
+        base_rot = rng.uniform(-math.pi / 10, math.pi / 10, size=3)
+        scale = float(rng.uniform(0.9, 1.05))
+        rot = rotation_matrix(base_rot)
+
+        def layout(count: int) -> tuple[List[np.ndarray], str]:
+            positions, layout_name = self._layout_positions(count)
+            positions = [scale * (rot @ p) for p in positions]
+            return positions, layout_name
+
+        def next_order(cur_order: List[int]) -> List[int]:
+            densities = [density_map[idx] for idx in cur_order]
+            k = (len(cur_order) + 1) // 2
+            eater_positions = sorted(range(len(cur_order)), key=lambda i: densities[i], reverse=True)[:k]
+            eater_set = set(eater_positions)
+            offset = 1 if direction == "cw" else -1
+            remove_positions = []
+            for eater_pos in eater_positions:
+                prey_pos = (eater_pos + offset) % len(cur_order)
+                if prey_pos in eater_set:
+                    continue
+                remove_positions.append(prey_pos)
+            remove_set = set(remove_positions)
+            return [obj_id for idx, obj_id in enumerate(cur_order) if idx not in remove_set]
+
+        order_a = list(range(6))
+        for _ in range(60):
+            rng.shuffle(order_a)
+            order_b = next_order(order_a)
+            order_c = next_order(order_b)
+            if len(order_b) < len(order_a) and len(order_c) < len(order_b) and len(order_c) >= 2:
+                break
+        else:
+            order_b = next_order(order_a)
+            order_c = next_order(order_b)
+
+        def min_pairwise_distance(points: List[np.ndarray]) -> float:
+            if len(points) < 2:
+                return float("inf")
+            min_dist = float("inf")
+            for i in range(len(points)):
+                for j in range(i + 1, len(points)):
+                    d = float(np.linalg.norm(points[i] - points[j]))
+                    if d < min_dist:
+                        min_dist = d
+            return min_dist
+
+        base_positions, _layout_name = layout(6)
+        max_rad = max(approx_radius(obj) for obj in objs)
+        min_dist = min_pairwise_distance(base_positions)
+        gap = 0.08
+        scale_factor = 1.0
+        if min_dist < 2 * max_rad + gap:
+            scale_factor = (2 * max_rad + gap) / max(min_dist, 1e-6)
+            base_positions = [p * scale_factor for p in base_positions]
+            scale *= scale_factor
+
+        pos_by_obj = {obj_id: base_positions[pos_idx] for pos_idx, obj_id in enumerate(order_a)}
+
+        def build_frame(cur_order: List[int]) -> Scene:
+            arranged: List[ObjectState] = []
+            for obj_idx in cur_order:
+                obj = objs[obj_idx].copy()
+                obj.p = pos_by_obj[obj_idx]
+                arranged.append(obj)
+            return scene_from_objects(arranged)
+
+        scene_a = build_frame(order_a)
+        scene_b = build_frame(order_b)
+        scene_c = build_frame(order_c)
+        scenes = [scene_a, scene_b, scene_c]
+
+        v = [order_a, order_b, order_c]
+        meta = build_rule_meta(
+            self,
+            "R3",
+            3,
+            list(range(len(scene_a.objects))),
+            ["p"],
+            ["count(O)"],
+            "cycle-consume",
+            {
+                "direction": direction,
+                "shape": base_shape,
+                "rotation_euler": base_rot.tolist(),
+                "scale": scale,
+                "size": size_val,
+                "densities": [density_map[i] for i in range(6)],
+                "orders": [order_a, order_b, order_c],
+            },
+            v,
+            scenes,
+        )
+        return scenes[0], scenes[1], scenes[2], meta
+
+    def make_distractors(self, scene_c: Scene, rng, meta: Dict) -> Tuple[list[Scene], list[str]]:
+        frames = meta.get("frames", [])
+        if len(frames) < 3:
+            return [], []
+
+        def obj_from_desc(desc: Dict) -> ObjectState:
+            return ObjectState(
+                shape=str(desc.get("shape", "cube")),
+                r=np.array(desc.get("r", [1.0, 1.0, 1.0]), dtype=float),
+                p=np.array(desc.get("p", [0.0, 0.0, 0.0]), dtype=float),
+                rotation=np.array(desc.get("rotation_euler", [0.0, 0.0, 0.0]), dtype=float),
+                density=float(desc.get("density", 1.0)),
+            )
+
+        def signature(desc: Dict) -> Tuple:
+            r = [round(float(x), 4) for x in desc.get("r", [0.0, 0.0, 0.0])]
+            rot = [round(float(x), 4) for x in desc.get("rotation_euler", [0.0, 0.0, 0.0])]
+            return (desc.get("shape", ""), tuple(r), tuple(rot), round(float(desc.get("density", 1.0)), 4))
+
+        b_descs = frames[1].get("objects", [])
+        if len(b_descs) < 2:
+            return [], []
+
+        b_objs = [obj_from_desc(d) for d in b_descs]
+        params = meta.get("pattern_params", {})
+        direction = params.get("direction", "cw")
+
+        def build_with(objs_in_order: List[ObjectState]) -> Scene:
+            arranged: List[ObjectState] = []
+            for obj in objs_in_order:
+                o = obj.copy()
+                arranged.append(o)
+            return scene_from_objects(arranged)
+
+        def eater_positions(cur_objs: List[ObjectState]) -> List[int]:
+            densities = [density(o) for o in cur_objs]
+            k = (len(cur_objs) + 1) // 2
+            return sorted(range(len(cur_objs)), key=lambda i: densities[i], reverse=True)[:k]
+
+        def step(cur_objs: List[ObjectState], use_direction: str, conflict_rule: bool, use_smallest: bool = False) -> List[ObjectState]:
+            if len(cur_objs) <= 1:
+                return cur_objs
+            if use_smallest:
+                densities = [density(o) for o in cur_objs]
+                k = (len(cur_objs) + 1) // 2
+                eater_pos = sorted(range(len(cur_objs)), key=lambda i: densities[i])[:k]
+            else:
+                eater_pos = eater_positions(cur_objs)
+            eater_set = set(eater_pos)
+            offset = 1 if use_direction == "cw" else -1
+            remove_positions = []
+            for pos in eater_pos:
+                prey = (pos + offset) % len(cur_objs)
+                if conflict_rule and prey in eater_set:
+                    continue
+                remove_positions.append(prey)
+            remove_set = set(remove_positions)
+            return [obj for idx, obj in enumerate(cur_objs) if idx not in remove_set]
+
+        correct_next = step(b_objs, direction, conflict_rule=True)
+
+        candidates = [
+            ("顺逆方向错误", step(b_objs, "ccw" if direction == "cw" else "cw", conflict_rule=True)),
+            ("忽略吞噬冲突规则", step(b_objs, direction, conflict_rule=False)),
+            ("吞噬主体选择错误", step(b_objs, direction, conflict_rule=True, use_smallest=True)),
+        ]
+
+        distractors = []
+        reasons = []
+        seen = set()
+        correct_sig = tuple(signature(o.as_dict()) for o in correct_next)
+        for reason, objs in candidates:
+            sig = tuple(signature(o.as_dict()) for o in objs)
+            if sig == correct_sig:
+                continue
+            if sig in seen:
+                continue
+            seen.add(sig)
+            distractors.append(build_with(objs))
+            reasons.append(reason)
+            if len(distractors) == 3:
+                break
+
+        if len(distractors) < 3:
+            extra = [("未发生吞噬", b_objs)]
+            if len(b_objs) > 2:
+                for i in range(len(b_objs)):
+                    keep = [obj for j, obj in enumerate(b_objs) if j != i]
+                    extra.append(("吞噬对象选择错误", keep))
+            for reason, objs in extra:
+                sig = tuple(signature(o.as_dict()) for o in objs)
+                if sig == correct_sig or sig in seen:
+                    continue
+                seen.add(sig)
+                distractors.append(build_with(objs))
+                reasons.append(reason)
+                if len(distractors) == 3:
+                    break
+
+        return distractors, reasons
+
+
+@dataclass
 class R3_5CycleConsume(Rule):
     def __init__(self) -> None:
-        super().__init__("R3-5", RuleDifficulty.COMPLEX, "循环吞噬", "多对象按顺/逆时针吞噬相邻对象")
+        super().__init__("R3-5", RuleDifficulty.COMPLEX, "尺寸循环吞噬", "多对象按顺/逆时针吞噬相邻对象（按尺寸）")
 
     def sample_params(self, rng) -> Dict:
         direction = "cw" if rng.random() < 0.5 else "ccw"
@@ -824,18 +1078,23 @@ class R3_5CycleConsume(Rule):
                         min_dist = d
             return min_dist
 
+        base_positions, _layout_name = layout(6)
+        max_rad = max(approx_radius(obj) for obj in objs)
+        min_dist = min_pairwise_distance(base_positions)
+        gap = 0.08
+        scale_factor = 1.0
+        if min_dist < 2 * max_rad + gap:
+            scale_factor = (2 * max_rad + gap) / max(min_dist, 1e-6)
+            base_positions = [p * scale_factor for p in base_positions]
+            scale *= scale_factor
+
+        pos_by_obj = {obj_id: base_positions[pos_idx] for pos_idx, obj_id in enumerate(order_a)}
+
         def build_frame(cur_order: List[int]) -> Scene:
-            positions, _layout_name = layout(len(cur_order))
-            arranged_objs = [objs[obj_idx].copy() for obj_idx in cur_order]
-            max_rad = max(approx_radius(obj) for obj in arranged_objs)
-            min_dist = min_pairwise_distance(positions)
-            gap = 0.08
-            if min_dist < 2 * max_rad + gap:
-                scale_factor = (2 * max_rad + gap) / max(min_dist, 1e-6)
-                positions = [p * scale_factor for p in positions]
             arranged: List[ObjectState] = []
-            for pos_idx, obj in enumerate(arranged_objs):
-                obj.p = positions[pos_idx]
+            for obj_idx in cur_order:
+                obj = objs[obj_idx].copy()
+                obj.p = pos_by_obj[obj_idx]
                 arranged.append(obj)
             return scene_from_objects(arranged)
 
@@ -892,37 +1151,11 @@ class R3_5CycleConsume(Rule):
         b_objs = [obj_from_desc(d) for d in b_descs]
         params = meta.get("pattern_params", {})
         direction = params.get("direction", "cw")
-        base_rot = np.array(params.get("rotation_euler", [0.0, 0.0, 0.0]), dtype=float)
-        scale = float(params.get("scale", 1.0))
-        rot = rotation_matrix(base_rot)
-
-        def layout(count: int) -> List[np.ndarray]:
-            positions, _layout_name = self._layout_positions(count)
-            return [scale * (rot @ p) for p in positions]
-
-        def min_pairwise_distance(points: List[np.ndarray]) -> float:
-            if len(points) < 2:
-                return float("inf")
-            min_dist = float("inf")
-            for i in range(len(points)):
-                for j in range(i + 1, len(points)):
-                    d = float(np.linalg.norm(points[i] - points[j]))
-                    if d < min_dist:
-                        min_dist = d
-            return min_dist
 
         def build_with(objs_in_order: List[ObjectState]) -> Scene:
-            positions = layout(len(objs_in_order))
-            max_rad = max(approx_radius(obj) for obj in objs_in_order)
-            min_dist = min_pairwise_distance(positions)
-            gap = 0.08
-            if min_dist < 2 * max_rad + gap:
-                scale_factor = (2 * max_rad + gap) / max(min_dist, 1e-6)
-                positions = [p * scale_factor for p in positions]
             arranged: List[ObjectState] = []
-            for pos_idx, obj in enumerate(objs_in_order):
+            for obj in objs_in_order:
                 o = obj.copy()
-                o.p = positions[pos_idx]
                 arranged.append(o)
             return scene_from_objects(arranged)
 
@@ -3214,6 +3447,7 @@ def build_complex_rules() -> List[Rule]:
         R2_6RelativeOrientationInvariant(),
         R3_1SpiralAscend(),
         R3_3LineRotate(),
+        R3_4DensityCycleConsume(),
         R3_5CycleConsume(),
         R3_6OrientationShift(),
         R3_7PositionCycle(),
