@@ -793,15 +793,27 @@ class R3_4DensityCycleConsume(Rule):
             positions = [scale * (rot @ p) for p in positions]
             return positions, layout_name
 
+        def eater_positions(cur_order: List[int]) -> List[int]:
+            if len(cur_order) < 3:
+                return []
+            positions = []
+            for i in range(len(cur_order)):
+                left = (i - 1) % len(cur_order)
+                right = (i + 1) % len(cur_order)
+                cur_val = density_map[cur_order[i]]
+                if cur_val > density_map[cur_order[left]] and cur_val > density_map[cur_order[right]]:
+                    positions.append(i)
+            return positions
+
         def next_order(cur_order: List[int]) -> List[int]:
-            densities = [density_map[idx] for idx in cur_order]
-            k = (len(cur_order) + 1) // 2
-            eater_positions = sorted(range(len(cur_order)), key=lambda i: densities[i], reverse=True)[:k]
-            eater_set = set(eater_positions)
+            eater_pos = eater_positions(cur_order)
+            if not eater_pos:
+                return cur_order
+            eater_set = set(eater_pos)
             offset = 1 if direction == "cw" else -1
             remove_positions = []
-            for eater_pos in eater_positions:
-                prey_pos = (eater_pos + offset) % len(cur_order)
+            for pos in eater_pos:
+                prey_pos = (pos + offset) % len(cur_order)
                 if prey_pos in eater_set:
                     continue
                 remove_positions.append(prey_pos)
@@ -912,20 +924,28 @@ class R3_4DensityCycleConsume(Rule):
                 arranged.append(o)
             return scene_from_objects(arranged)
 
-        def eater_positions(cur_objs: List[ObjectState]) -> List[int]:
-            densities = [density(o) for o in cur_objs]
-            k = (len(cur_objs) + 1) // 2
-            return sorted(range(len(cur_objs)), key=lambda i: densities[i], reverse=True)[:k]
+        def eater_positions(cur_objs: List[ObjectState], use_smallest: bool = False) -> List[int]:
+            if len(cur_objs) < 3:
+                return []
+            values = [density(o) for o in cur_objs]
+            positions = []
+            for i in range(len(cur_objs)):
+                left = (i - 1) % len(cur_objs)
+                right = (i + 1) % len(cur_objs)
+                if use_smallest:
+                    if values[i] < values[left] and values[i] < values[right]:
+                        positions.append(i)
+                else:
+                    if values[i] > values[left] and values[i] > values[right]:
+                        positions.append(i)
+            return positions
 
         def step(cur_objs: List[ObjectState], use_direction: str, conflict_rule: bool, use_smallest: bool = False) -> List[ObjectState]:
             if len(cur_objs) <= 1:
                 return cur_objs
-            if use_smallest:
-                densities = [density(o) for o in cur_objs]
-                k = (len(cur_objs) + 1) // 2
-                eater_pos = sorted(range(len(cur_objs)), key=lambda i: densities[i])[:k]
-            else:
-                eater_pos = eater_positions(cur_objs)
+            eater_pos = eater_positions(cur_objs, use_smallest=use_smallest)
+            if not eater_pos:
+                return cur_objs
             eater_set = set(eater_pos)
             offset = 1 if use_direction == "cw" else -1
             remove_positions = []
@@ -1041,15 +1061,27 @@ class R3_5CycleConsume(Rule):
             positions = [scale * (rot @ p) for p in positions]
             return positions, layout_name
 
+        def eater_positions(cur_order: List[int]) -> List[int]:
+            if len(cur_order) < 3:
+                return []
+            positions = []
+            for i in range(len(cur_order)):
+                left = (i - 1) % len(cur_order)
+                right = (i + 1) % len(cur_order)
+                cur_val = size_map[cur_order[i]]
+                if cur_val > size_map[cur_order[left]] and cur_val > size_map[cur_order[right]]:
+                    positions.append(i)
+            return positions
+
         def next_order(cur_order: List[int]) -> List[int]:
-            sizes = [size_map[idx] for idx in cur_order]
-            k = (len(cur_order) + 1) // 2
-            eater_positions = sorted(range(len(cur_order)), key=lambda i: sizes[i], reverse=True)[:k]
-            eater_set = set(eater_positions)
+            eater_pos = eater_positions(cur_order)
+            if not eater_pos:
+                return cur_order
+            eater_set = set(eater_pos)
             offset = 1 if direction == "cw" else -1
             remove_positions = []
-            for eater_pos in eater_positions:
-                prey_pos = (eater_pos + offset) % len(cur_order)
+            for pos in eater_pos:
+                prey_pos = (pos + offset) % len(cur_order)
                 if prey_pos in eater_set:
                     continue
                 remove_positions.append(prey_pos)
@@ -1159,20 +1191,28 @@ class R3_5CycleConsume(Rule):
                 arranged.append(o)
             return scene_from_objects(arranged)
 
-        def eater_positions(cur_objs: List[ObjectState]) -> List[int]:
-            sizes = [size(o) for o in cur_objs]
-            k = (len(cur_objs) + 1) // 2
-            return sorted(range(len(cur_objs)), key=lambda i: sizes[i], reverse=True)[:k]
+        def eater_positions(cur_objs: List[ObjectState], use_smallest: bool = False) -> List[int]:
+            if len(cur_objs) < 3:
+                return []
+            values = [size(o) for o in cur_objs]
+            positions = []
+            for i in range(len(cur_objs)):
+                left = (i - 1) % len(cur_objs)
+                right = (i + 1) % len(cur_objs)
+                if use_smallest:
+                    if values[i] < values[left] and values[i] < values[right]:
+                        positions.append(i)
+                else:
+                    if values[i] > values[left] and values[i] > values[right]:
+                        positions.append(i)
+            return positions
 
         def step(cur_objs: List[ObjectState], use_direction: str, conflict_rule: bool, use_smallest: bool = False) -> List[ObjectState]:
             if len(cur_objs) <= 1:
                 return cur_objs
-            if use_smallest:
-                sizes = [size(o) for o in cur_objs]
-                k = (len(cur_objs) + 1) // 2
-                eater_pos = sorted(range(len(cur_objs)), key=lambda i: sizes[i])[:k]
-            else:
-                eater_pos = eater_positions(cur_objs)
+            eater_pos = eater_positions(cur_objs, use_smallest=use_smallest)
+            if not eater_pos:
+                return cur_objs
             eater_set = set(eater_pos)
             offset = 1 if use_direction == "cw" else -1
             remove_positions = []
