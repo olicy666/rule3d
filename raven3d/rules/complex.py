@@ -98,7 +98,7 @@ def _all_non_contact(objs: Sequence[ObjectState], gap: float = 0.05) -> bool:
 @dataclass
 class R1_9ScaleRotateCoupled(Rule):
     def __init__(self) -> None:
-        super().__init__("R1-9", RuleDifficulty.COMPLEX, "复合位姿缩放", "scale 与 rotation 复合")
+        super().__init__("R1-7", RuleDifficulty.COMPLEX, "复合位姿缩放", "scale 与 rotation 复合")
 
     def sample_params(self, rng) -> Dict:
         k = float(rng.uniform(1.15, 1.5))
@@ -108,17 +108,14 @@ class R1_9ScaleRotateCoupled(Rule):
     def generate_triplet(self, params, rng):
         k = params["k"]
         delta_rot = np.array(params["delta_rot"])
-        objs = init_objects(rng, 1, m=2)
-        non_sphere_shapes = [shape for shape in SHAPES if shape != "sphere"]
-        for idx, obj in enumerate(objs):
-            if obj.shape == "sphere":
-                objs[idx] = switch_shape(obj, str(rng.choice(non_sphere_shapes)))
+        obj = random_object(rng)
+        if obj.shape == "sphere":
+            non_sphere_shapes = [shape for shape in SHAPES if shape != "sphere"]
+            obj = switch_shape(obj, str(rng.choice(non_sphere_shapes)))
         involved = [0]
-        a_objs = clone_objects(objs)
-        b_objs = clone_objects(objs)
-        b_objs[0] = apply_scale(apply_rotation(b_objs[0], delta_rot), k)
-        c_objs = clone_objects(b_objs)
-        c_objs[0] = apply_scale(apply_rotation(c_objs[0], delta_rot), k)
+        a_objs = [obj.copy()]
+        b_objs = [apply_scale(apply_rotation(a_objs[0], delta_rot), k)]
+        c_objs = [apply_scale(apply_rotation(b_objs[0], delta_rot), k)]
         scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
         v = [[size(o), float(np.linalg.norm(o.rotation))] for o in [a_objs[0], b_objs[0], c_objs[0]]]
         meta = build_rule_meta(
@@ -205,7 +202,7 @@ class C03ConditionalShapeScale(Rule):
 @dataclass
 class R2_6RelativeOrientationInvariant(Rule):
     def __init__(self) -> None:
-        super().__init__("R2-6", RuleDifficulty.COMPLEX, "相对姿态保持", "共同旋转保持夹角不变")
+        super().__init__("R2-10", RuleDifficulty.COMPLEX, "相对姿态保持", "共同旋转保持夹角不变")
 
     def sample_params(self, rng) -> Dict:
         theta = float(rng.uniform(math.pi / 18, math.pi / 10))

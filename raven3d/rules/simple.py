@@ -21,6 +21,7 @@ from .utils import (
     clone_objects,
     dist,
     init_objects,
+    _separate_objects_no_contact,
     place_extras_apart,
     random_object,
     scene_from_objects,
@@ -70,8 +71,8 @@ class R1_1ScaleArithmetic(Rule):
         return {"delta_ratio": delta_ratio * sign}
 
     def generate_triplet(self, params, rng):
-        objs = init_objects(rng, 1)
-        involved = list(range(len(objs)))
+        objs = [random_object(rng)]
+        involved = [0]
         base_obj = objs[0]
         base_size = size(base_obj)
         delta_ratio = float(params["delta_ratio"])
@@ -145,7 +146,7 @@ class S03SingleAxisGeometric(Rule):
         return {"k": k}
 
     def generate_triplet(self, params, rng):
-        objs = init_objects(rng, 1)
+        objs = [random_object(rng)]
         involved = [0]
         k = params["k"]
         a_objs = clone_objects(objs)
@@ -164,7 +165,7 @@ class S03SingleAxisGeometric(Rule):
 @dataclass
 class R2_12AxisPermutation(Rule):
     def __init__(self) -> None:
-        super().__init__("R2-12", RuleDifficulty.SIMPLE, "尺度轴置换循环", "r_x/r_y/r_z 按固定置换循环")
+        super().__init__("R2-16", RuleDifficulty.SIMPLE, "尺度轴置换循环", "r_x/r_y/r_z 按固定置换循环")
 
     def sample_params(self, rng) -> Dict:
         order = rng.choice([[1, 2, 0], [2, 0, 1]])
@@ -232,7 +233,7 @@ class R2_12AxisPermutation(Rule):
 @dataclass
 class R2_2AnisotropicGeometric(Rule):
     def __init__(self) -> None:
-        super().__init__("R2-2", RuleDifficulty.SIMPLE, "各向异性等比拉伸", "体积不变的等比拉伸")
+        super().__init__("R2-6", RuleDifficulty.SIMPLE, "各向异性等比拉伸", "体积不变的等比拉伸")
 
     def sample_params(self, rng) -> Dict:
         factor = float(rng.uniform(1.25, 1.7))
@@ -437,7 +438,7 @@ class R1_4TranslationArithmetic(Rule):
 
     def generate_triplet(self, params, rng):
         delta = np.array(params["delta"])
-        objs = init_objects(rng, 1)
+        objs = [random_object(rng)]
         involved = [0]
         a_objs = clone_objects(objs)
         b_objs = clone_objects(objs)
@@ -517,7 +518,7 @@ class R1_5DensityArithmetic(Rule):
         return {"delta_ratio": delta_ratio}
 
     def generate_triplet(self, params, rng):
-        objs = init_objects(rng, 2)
+        objs = [random_object(rng)]
         involved = [0]
         a_objs = clone_objects(objs)
         b_objs = clone_objects(objs)
@@ -687,86 +688,63 @@ class R1_6ShapeChangeFollow(Rule):
         return {}
 
     def generate_triplet(self, params, rng):
-        objs = init_objects(rng, 3, m=3)
-        involved = [0, 1, 2]
-        shapes_a = rng.choice(SHAPES, size=3, replace=True).tolist()
-        while len(set(shapes_a)) == 1:
-            shapes_a = rng.choice(SHAPES, size=3, replace=True).tolist()
-        for i, shape in enumerate(shapes_a):
-            objs[i].shape = shape
+        obj = random_object(rng)
+        involved = [0]
+        shape_a = obj.shape
+        shape_b_choices = [s for s in SHAPES if s != shape_a]
+        shape_b = str(rng.choice(shape_b_choices))
+        shape_c_choices = [s for s in SHAPES if s != shape_b]
+        shape_c = str(rng.choice(shape_c_choices))
 
-        change_idx = int(rng.integers(0, 3))
-        shapes_b = list(shapes_a)
-        shape_b_choices = [s for s in SHAPES if s != shapes_a[change_idx]]
-        shapes_b[change_idx] = str(rng.choice(shape_b_choices))
-
-        shapes_c = list(shapes_b)
-        shape_c_choices = [s for s in SHAPES if s != shapes_b[change_idx]]
-        shapes_c[change_idx] = str(rng.choice(shape_c_choices))
-
-        a_objs = clone_objects(objs)
-        b_objs = clone_objects(objs)
-        c_objs = clone_objects(objs)
-        for i in range(3):
-            b_objs[i] = switch_shape(b_objs[i], shapes_b[i])
-            c_objs[i] = switch_shape(c_objs[i], shapes_c[i])
+        a_objs = [obj.copy()]
+        b_objs = [switch_shape(a_objs[0], shape_b)]
+        c_objs = [switch_shape(b_objs[0], shape_c)]
         scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
-        v = [shapes_a, shapes_b, shapes_c]
+        v = [[shape_a], [shape_b], [shape_c]]
         meta = build_rule_meta(
-            self, "R1", 3, involved, ["s", "p"], ["shape_change_mask"], "discrete", {}, v, scenes
+            self, "R1", 1, involved, ["s"], ["s(O0)"], "discrete", {}, v, scenes
         )
         return scenes[0], scenes[1], scenes[2], meta
 
     def make_distractors(self, scene_c: Scene, rng, meta: Dict) -> Tuple[list[Scene], list[str]]:
-        if len(scene_c.objects) < 3:
+        if len(scene_c.objects) < 1:
             return [], []
         v = meta.get("v", {})
         shapes_a = v.get("v1")
         shapes_b = v.get("v2")
         if not shapes_a or not shapes_b:
             return [], []
-        change_indices = [i for i, (sa, sb) in enumerate(zip(shapes_a, shapes_b)) if sa != sb]
-        if not change_indices:
-            return [], []
-        change_idx = int(change_indices[0])
+        shape_a = shapes_a[0]
+        shape_b = shapes_b[0]
+        shape_c = scene_c.objects[0].shape
 
-        shapes_c = [obj.shape for obj in scene_c.objects]
-
-        def with_shapes(shapes: List[str]) -> Scene:
+        def with_shape(shape: str) -> Scene:
             objs = clone_objects(scene_c.objects)
-            for i, shape in enumerate(shapes):
-                objs[i] = switch_shape(objs[i], shape)
+            objs[0] = switch_shape(objs[0], shape)
             return scene_from_objects(objs)
 
-        wrong_no_change = with_shapes(shapes_b)
-
-        wrong_idx = (change_idx + 1) % 3
-        shapes_wrong_idx = list(shapes_c)
-        alt_shapes = [s for s in SHAPES if s != shapes_wrong_idx[wrong_idx]]
-        shapes_wrong_idx[wrong_idx] = str(rng.choice(alt_shapes))
-        wrong_change_other = with_shapes(shapes_wrong_idx)
-
-        shapes_extra = list(shapes_c)
-        extra_idx = (change_idx + 2) % 3
-        extra_choices = [s for s in SHAPES if s != shapes_extra[extra_idx]]
-        shapes_extra[extra_idx] = str(rng.choice(extra_choices))
-        wrong_extra_change = with_shapes(shapes_extra)
+        wrong_no_change = with_shape(shape_b)
+        wrong_back = with_shape(shape_a)
+        alt_choices = [s for s in SHAPES if s not in (shape_a, shape_b, shape_c)]
+        if not alt_choices:
+            alt_choices = [s for s in SHAPES if s not in (shape_b, shape_c)]
+        wrong_other = with_shape(str(rng.choice(alt_choices)))
 
         return [
             wrong_no_change,
-            wrong_change_other,
-            wrong_extra_change,
+            wrong_back,
+            wrong_other,
         ], [
-            "变化位置未延续（C 与 B 相同）",
-            "变化位置错误（在其他位置发生变化）",
-            "变化位置过多（出现额外变化）",
+            "变化未延续（停留在上一帧）",
+            "变化方向错误（回到初始形状）",
+            "变化形状不符合规则",
         ]
 
 
 @dataclass
 class R1_7ScaleCentroidCoupled(Rule):
     def __init__(self) -> None:
-        super().__init__("R1-7", RuleDifficulty.SIMPLE, "质心守恒缩放", "缩放并平移以保持参与集合质心不变")
+        super().__init__("R2-1", RuleDifficulty.SIMPLE, "质心守恒缩放", "缩放并平移以保持参与集合质心不变")
 
     def sample_params(self, rng) -> Dict:
         k = float(rng.uniform(1.2, 1.6))
@@ -794,7 +772,7 @@ class R1_7ScaleCentroidCoupled(Rule):
         v = [centroid(s.objects) for s in scenes]
         meta = build_rule_meta(
             self,
-            "R1",
+            "R2",
             len(involved),
             involved,
             ["r", "p"],
@@ -810,7 +788,7 @@ class R1_7ScaleCentroidCoupled(Rule):
 @dataclass
 class R1_14InverseDistanceSize(Rule):
     def __init__(self) -> None:
-        super().__init__("R1-14", RuleDifficulty.SIMPLE, "距离尺寸倒数", "距离越近尺寸变化越剧烈")
+        super().__init__("R1-10", RuleDifficulty.SIMPLE, "距离尺寸倒数", "距离越近尺寸变化越剧烈")
 
     def sample_params(self, rng) -> Dict:
         k = float(rng.uniform(0.35, 0.65))
@@ -898,7 +876,7 @@ class R1_14InverseDistanceSize(Rule):
 @dataclass
 class R1_15InverseDistanceDensity(Rule):
     def __init__(self) -> None:
-        super().__init__("R1-15", RuleDifficulty.SIMPLE, "距离密度倒数", "距离越近密度变化越剧烈")
+        super().__init__("R2-4", RuleDifficulty.SIMPLE, "距离密度倒数", "距离越近密度变化越剧烈")
 
     def sample_params(self, rng) -> Dict:
         k = float(rng.uniform(0.5, 0.8))
@@ -937,7 +915,7 @@ class R1_15InverseDistanceDensity(Rule):
         v = [[o.density for o in s.objects] for s in scenes]
         meta = build_rule_meta(
             self,
-            "R1",
+            "R2",
             3,
             involved,
             ["d"],
@@ -983,7 +961,7 @@ class R1_15InverseDistanceDensity(Rule):
 @dataclass
 class R1_16ShapeCountArithmetic(Rule):
     def __init__(self) -> None:
-        super().__init__("R1-16", RuleDifficulty.SIMPLE, "几何体个数变化", "形状计数等差增加")
+        super().__init__("R1-11", RuleDifficulty.SIMPLE, "几何体个数变化", "形状计数等差增加")
 
     def sample_params(self, rng) -> Dict:
         return {}
@@ -1016,6 +994,7 @@ class R1_16ShapeCountArithmetic(Rule):
             for shape, num in zip(shapes, counts):
                 for _ in range(int(num)):
                     objs.append(random_object(rng, shape=shape))
+            _separate_objects_no_contact(objs, rng, gap=0.18)
             rng.shuffle(objs)
             return scene_from_objects(objs)
 
@@ -1057,6 +1036,7 @@ class R1_16ShapeCountArithmetic(Rule):
             for shape, num in zip(shapes, counts):
                 for _ in range(int(num)):
                     objs.append(random_object(rng, shape=shape))
+            _separate_objects_no_contact(objs, rng, gap=0.18)
             rng.shuffle(objs)
             return scene_from_objects(objs)
 

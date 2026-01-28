@@ -74,7 +74,7 @@ class M01DistanceArithmetic(Rule):
 @dataclass
 class R2_1DistanceGeometric(Rule):
     def __init__(self) -> None:
-        super().__init__("R2-1", RuleDifficulty.MEDIUM, "成对距离等比", "dist(i,j) 等比")
+        super().__init__("R2-5", RuleDifficulty.MEDIUM, "成对距离等比", "dist(i,j) 等比")
 
     def sample_params(self, rng) -> Dict:
         k = float(rng.uniform(1.15, 1.6) if rng.random() < 0.5 else rng.uniform(0.65, 0.9))
@@ -163,7 +163,7 @@ class R2_1DistanceGeometric(Rule):
 @dataclass
 class R2_3DirectionRotate(Rule):
     def __init__(self) -> None:
-        super().__init__("R2-3", RuleDifficulty.MEDIUM, "方向旋转等差", "dir 旋转, dist 保持")
+        super().__init__("R2-7", RuleDifficulty.MEDIUM, "方向旋转等差", "dir 旋转, dist 保持")
 
     def sample_params(self, rng) -> Dict:
         theta = float(rng.uniform(math.pi / 4, math.pi / 2))
@@ -332,7 +332,7 @@ class M05TouchSequence(Rule):
 @dataclass
 class R2_7AcceleratedRotation(Rule):
     def __init__(self) -> None:
-        super().__init__("R2-7", RuleDifficulty.MEDIUM, "加速旋转", "旋转幅度递增")
+        super().__init__("R2-11", RuleDifficulty.MEDIUM, "加速旋转", "旋转幅度递增")
 
     def sample_params(self, rng) -> Dict:
         obj_count = int(rng.integers(3, 7))
@@ -414,7 +414,7 @@ class R2_7AcceleratedRotation(Rule):
 @dataclass
 class R2_8OrbitalRotation(Rule):
     def __init__(self) -> None:
-        super().__init__("R2-8", RuleDifficulty.MEDIUM, "行星公转", "多物体绕中心球体等速公转")
+        super().__init__("R2-12", RuleDifficulty.MEDIUM, "行星公转", "多物体绕中心球体等速公转")
 
     def sample_params(self, rng) -> Dict:
         count = int(rng.integers(2, 5))
@@ -539,7 +539,7 @@ class R2_8OrbitalRotation(Rule):
 @dataclass
 class R2_9PoseShift(Rule):
     def __init__(self) -> None:
-        super().__init__("R2-9", RuleDifficulty.MEDIUM, "易位姿态转换", "按形状匹配的姿态变化持续")
+        super().__init__("R2-13", RuleDifficulty.MEDIUM, "易位姿态转换", "按形状匹配的姿态变化持续")
 
     def sample_params(self, rng) -> Dict:
         count = int(rng.integers(2, 6))
@@ -636,7 +636,7 @@ class R2_9PoseShift(Rule):
 @dataclass
 class R2_10PositionScaleShift(Rule):
     def __init__(self) -> None:
-        super().__init__("R2-10", RuleDifficulty.MEDIUM, "易位尺寸转换", "按形状匹配的尺寸变化持续")
+        super().__init__("R2-14", RuleDifficulty.MEDIUM, "易位尺寸转换", "按形状匹配的尺寸变化持续")
 
     def sample_params(self, rng) -> Dict:
         count = int(rng.integers(2, 6))
@@ -724,7 +724,7 @@ class R2_10PositionScaleShift(Rule):
 @dataclass
 class R2_11PositionDensityShift(Rule):
     def __init__(self) -> None:
-        super().__init__("R2-11", RuleDifficulty.MEDIUM, "易位密度转换", "按形状匹配的密度变化持续")
+        super().__init__("R2-15", RuleDifficulty.MEDIUM, "易位密度转换", "按形状匹配的密度变化持续")
 
     def sample_params(self, rng) -> Dict:
         count = int(rng.integers(2, 6))
@@ -812,7 +812,7 @@ class R2_11PositionDensityShift(Rule):
 @dataclass
 class R2_4ContainRatioArithmetic(Rule):
     def __init__(self) -> None:
-        super().__init__("R2-4", RuleDifficulty.MEDIUM, "包含比例等差", "内含比例按等差变化")
+        super().__init__("R2-8", RuleDifficulty.MEDIUM, "包含比例等差", "内含比例按等差变化")
 
     def sample_params(self, rng) -> Dict:
         for _ in range(30):
@@ -934,7 +934,7 @@ class R2_4ContainRatioArithmetic(Rule):
 @dataclass
 class R2_5AngleArithmetic(Rule):
     def __init__(self) -> None:
-        super().__init__("R2-5", RuleDifficulty.MEDIUM, "夹角等差", "轴夹角按等差变化")
+        super().__init__("R2-9", RuleDifficulty.MEDIUM, "夹角等差", "轴夹角按等差变化")
 
     def sample_params(self, rng) -> Dict:
         base_angle = float(rng.uniform(math.pi / 12, math.pi / 6))
@@ -1149,7 +1149,7 @@ class M13SymmetrySwitch(Rule):
 @dataclass
 class R1_8DualSizeConservation(Rule):
     def __init__(self) -> None:
-        super().__init__("R1-8", RuleDifficulty.MEDIUM, "双对象属性联动", "size 和保持守恒")
+        super().__init__("R2-2", RuleDifficulty.MEDIUM, "双对象属性联动", "size 和保持守恒")
 
     def sample_params(self, rng) -> Dict:
         delta_ratio = float(rng.uniform(0.4, 0.8))
@@ -1205,7 +1205,7 @@ class R1_8DualSizeConservation(Rule):
         v = [[size(o0), size(o1)] for o0, o1 in [a_objs, b_objs, c_objs]]
         meta = build_rule_meta(
             self,
-            "R1",
+            "R2",
             2,
             involved,
             ["r"],
@@ -1263,7 +1263,7 @@ class R1_8DualSizeConservation(Rule):
 @dataclass
 class R1_10AttributeSwap(Rule):
     def __init__(self) -> None:
-        super().__init__("R1-10", RuleDifficulty.MEDIUM, "尺度/姿态交替互换", "尺寸与姿态交替互换（形状固定）")
+        super().__init__("R2-3", RuleDifficulty.MEDIUM, "尺度/姿态交替互换", "尺寸与姿态交替互换（形状固定）")
 
     def sample_params(self, rng) -> Dict:
         first_attr = "r" if rng.random() < 0.5 else "R"
@@ -1335,7 +1335,7 @@ class R1_10AttributeSwap(Rule):
         ]
         meta = build_rule_meta(
             self,
-            "R1",
+            "R2",
             2,
             involved,
             ["r", "R"],
@@ -1380,7 +1380,7 @@ class R1_10AttributeSwap(Rule):
 @dataclass
 class R1_11OrientationFollowMotion(Rule):
     def __init__(self) -> None:
-        super().__init__("R1-11", RuleDifficulty.MEDIUM, "主轴对齐位移", "移动方向与主轴一致")
+        super().__init__("R1-8", RuleDifficulty.MEDIUM, "主轴对齐位移", "移动方向与主轴一致")
 
     def sample_params(self, rng) -> Dict:
         step = float(rng.uniform(0.25, 0.4))
@@ -1439,7 +1439,7 @@ class R1_11OrientationFollowMotion(Rule):
 @dataclass
 class R1_12DensitySizeCoupled(Rule):
     def __init__(self) -> None:
-        super().__init__("R1-12", RuleDifficulty.MEDIUM, "密度驱动缩放", "密度越大缩放越大，密度越小缩放越小")
+        super().__init__("R1-9", RuleDifficulty.MEDIUM, "密度驱动缩放", "密度越大缩放越大，密度越小缩放越小")
 
     def sample_params(self, rng) -> Dict:
         scale_up = float(rng.uniform(3.0, 4.2))
@@ -1528,96 +1528,6 @@ class R1_12DensitySizeCoupled(Rule):
         return distractors, reasons
 
 
-@dataclass
-class R1_13MirrorDensityComplement(Rule):
-    def __init__(self) -> None:
-        super().__init__("R1-13", RuleDifficulty.MEDIUM, "镜像密度缩放", "镜像位置下密度一增一减")
-
-    def sample_params(self, rng) -> Dict:
-        scale_up = float(rng.uniform(1.8, 2.6))
-        scale_down = float(rng.uniform(0.35, 0.6))
-        if rng.random() < 0.5:
-            factors = [scale_up, scale_down]
-        else:
-            factors = [scale_down, scale_up]
-        return {"density_factors": factors}
-
-    def generate_triplet(self, params, rng):
-        objs = init_objects(rng, 2, m=2)
-        involved = [0, 1]
-        base_offset = float(rng.uniform(0.35, 0.55))
-        base_y = float(rng.uniform(-0.2, 0.2))
-        base_z = float(rng.uniform(-0.2, 0.2))
-        shape = str(rng.choice(SHAPES))
-        rot = rng.uniform(-0.6, 0.6, size=3)
-
-        left = objs[0].copy()
-        right = objs[1].copy()
-        left.shape = shape
-        right.shape = shape
-        left.p = np.array([-base_offset, base_y, base_z])
-        right.p = np.array([base_offset, base_y, base_z])
-        left.rotation = rot
-        right.rotation = rot * np.array([1.0, -1.0, -1.0])
-
-        factors = [float(f) for f in params.get("density_factors", [2.0, 0.5])]
-        if len(factors) != 2:
-            factors = [2.0, 0.5]
-
-        def step_pair(src):
-            out = []
-            for obj, factor in zip(src, factors):
-                out.append(apply_density(obj, factor))
-            return out
-
-        a_objs = [left, right]
-        b_objs = step_pair(a_objs)
-        c_objs = step_pair(b_objs)
-        scenes = [scene_from_objects(x) for x in [a_objs, b_objs, c_objs]]
-        v = [[float(o0.density), float(o1.density)] for o0, o1 in [a_objs, b_objs, c_objs]]
-        meta = build_rule_meta(
-            self,
-            "R1",
-            2,
-            involved,
-            ["p", "d", "R"],
-            ["mirror(x)", "den(Oi)"],
-            "coupled",
-            {"density_factors": factors},
-            v,
-            scenes,
-        )
-        return scenes[0], scenes[1], scenes[2], meta
-
-    def make_distractors(self, scene_c: Scene, rng, meta: Dict) -> Tuple[list[Scene], list[str]]:
-        if len(scene_c.objects) < 2:
-            return [], []
-        objs = clone_objects(scene_c.objects)
-        params = meta.get("pattern_params", {})
-        factors = params.get("density_factors")
-        if factors is None or len(factors) != 2:
-            factors = [2.0, 0.5]
-
-        stay = clone_objects(objs)
-        for i, factor in enumerate(factors):
-            stay[i] = apply_density(stay[i], 1.0 / float(factor))
-
-        reverse = clone_objects(objs)
-        for i, factor in enumerate(factors):
-            reverse[i] = apply_density(reverse[i], 1.0 / float(factor) ** 2)
-
-        break_mirror = clone_objects(objs)
-        break_mirror[1] = apply_translation(break_mirror[1], np.array([0.12, 0.0, 0.0]))
-
-        distractors = [
-            scene_from_objects(stay),
-            scene_from_objects(reverse),
-            scene_from_objects(break_mirror),
-        ]
-        reasons = ["密度未延续变化，停留在上一帧", "密度变化方向反向", "镜像关系被破坏"]
-        return distractors, reasons
-
-
 def build_medium_rules() -> List[Rule]:
     return [
         R2_1DistanceGeometric(),
@@ -1634,5 +1544,4 @@ def build_medium_rules() -> List[Rule]:
         R1_10AttributeSwap(),
         R1_11OrientationFollowMotion(),
         R1_12DensitySizeCoupled(),
-        R1_13MirrorDensityComplement(),
     ]
